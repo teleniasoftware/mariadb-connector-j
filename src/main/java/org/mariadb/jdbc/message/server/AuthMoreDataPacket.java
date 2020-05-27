@@ -1,0 +1,50 @@
+/*
+ * Copyright 2020 MariaDB Ab.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.mariadb.jdbc.message.server;
+
+import org.mariadb.jdbc.client.ConnectionContext;
+import org.mariadb.jdbc.client.ReadableByteBuf;
+
+public class AuthMoreDataPacket implements ServerMessage {
+
+  private byte[] data;
+
+  private AuthMoreDataPacket(byte[] data) {
+    this.data = data;
+  }
+
+  public static AuthMoreDataPacket decode(ReadableByteBuf buf, ConnectionContext context) {
+    buf.skip(1);
+    byte[] data = new byte[buf.readableBytes()];
+    buf.readBytes(data);
+    return new AuthMoreDataPacket(data);
+  }
+
+  public byte[] getData() {
+    return data;
+  }
+
+  @Override
+  public boolean ending() {
+    return true;
+  }
+
+  @Override
+  public String toString() {
+    return "AuthMoreDataPacket{data=" + data + '}';
+  }
+}

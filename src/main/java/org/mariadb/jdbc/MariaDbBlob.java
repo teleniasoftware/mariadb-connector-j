@@ -56,7 +56,6 @@ import java.io.*;
 import java.sql.Blob;
 import java.sql.SQLException;
 import java.util.Arrays;
-import org.mariadb.jdbc.internal.util.exceptions.ExceptionFactory;
 
 public class MariaDbBlob implements Blob, Serializable {
 
@@ -146,7 +145,7 @@ public class MariaDbBlob implements Blob, Serializable {
    */
   public byte[] getBytes(final long pos, final int length) throws SQLException {
     if (pos < 1) {
-      throw ExceptionFactory.INSTANCE.create(
+      throw new SQLException(
           String.format("Out of range (position should be > 0, but is %s)", pos));
     }
     final int offset = this.offset + (int) (pos - 1);
@@ -181,13 +180,13 @@ public class MariaDbBlob implements Blob, Serializable {
    */
   public InputStream getBinaryStream(final long pos, final long length) throws SQLException {
     if (pos < 1) {
-      throw ExceptionFactory.INSTANCE.create("Out of range (position should be > 0)");
+      throw new SQLException("Out of range (position should be > 0)");
     }
     if (pos - 1 > this.length) {
-      throw ExceptionFactory.INSTANCE.create("Out of range (position > stream size)");
+      throw new SQLException("Out of range (position > stream size)");
     }
     if (pos + length - 1 > this.length) {
-      throw ExceptionFactory.INSTANCE.create("Out of range (position + length - 1 > streamSize)");
+      throw new SQLException("Out of range (position + length - 1 > streamSize)");
     }
 
     return new ByteArrayInputStream(data, this.offset + (int) pos - 1, (int) length);
@@ -207,11 +206,11 @@ public class MariaDbBlob implements Blob, Serializable {
       return 0;
     }
     if (start < 1) {
-      throw ExceptionFactory.INSTANCE.create(
+      throw new SQLException(
           String.format("Out of range (position should be > 0, but is %s)", start));
     }
     if (start > this.length) {
-      throw ExceptionFactory.INSTANCE.create("Out of range (start > stream size)");
+      throw new SQLException("Out of range (start > stream size)");
     }
 
     outer:
@@ -258,7 +257,7 @@ public class MariaDbBlob implements Blob, Serializable {
    */
   public int setBytes(final long pos, final byte[] bytes) throws SQLException {
     if (pos < 1) {
-      throw ExceptionFactory.INSTANCE.create("pos should be > 0, first position is 1.");
+      throw new SQLException("pos should be > 0, first position is 1.");
     }
 
     final int arrayPos = (int) pos - 1;
@@ -310,7 +309,7 @@ public class MariaDbBlob implements Blob, Serializable {
       throws SQLException {
 
     if (pos < 1) {
-      throw ExceptionFactory.INSTANCE.create("pos should be > 0, first position is 1.");
+      throw new SQLException("pos should be > 0, first position is 1.");
     }
 
     final int arrayPos = (int) pos - 1;
@@ -357,7 +356,7 @@ public class MariaDbBlob implements Blob, Serializable {
    */
   public OutputStream setBinaryStream(final long pos) throws SQLException {
     if (pos < 1) {
-      throw ExceptionFactory.INSTANCE.create("Invalid position in blob");
+      throw new SQLException("Invalid position in blob");
     }
     if (offset > 0) {
       byte[] tmp = new byte[length];
@@ -393,5 +392,55 @@ public class MariaDbBlob implements Blob, Serializable {
     this.data = new byte[0];
     this.offset = 0;
     this.length = 0;
+  }
+}
+
+class BlobOutputStream extends OutputStream {
+
+  private final MariaDbBlob blob;
+  private int pos;
+
+  public BlobOutputStream(MariaDbBlob blob, int pos) {
+    this.blob = blob;
+    this.pos = pos;
+  }
+
+  @Override
+  public void write(int bit) throws IOException {
+
+    if (this.pos >= blob.length) {
+      byte[] tmp = new byte[2 * blob.length + 1];
+      System.arraycopy(blob.data, blob.offset, tmp, 0, blob.length);
+      blob.data = tmp;
+      pos -= blob.offset;
+      blob.offset = 0;
+      blob.length++;
+    }
+    blob.data[pos] = (byte) bit;
+    pos++;
+  }
+
+  @Override
+  public void write(byte[] buf, int off, int len) throws IOException {
+    if (off < 0) {
+      throw new IOException("Invalid offset " + off);
+    }
+    int realLen = Math.min(buf.length - off, len);
+    if (pos + realLen >= blob.length) {
+      int newLen = 2 * blob.length + realLen;
+      byte[] tmp = new byte[newLen];
+      System.arraycopy(blob.data, blob.offset, tmp, 0, blob.length);
+      blob.data = tmp;
+      pos -= blob.offset;
+      blob.offset = 0;
+      blob.length = pos + realLen;
+    }
+    System.arraycopy(buf, off, blob.data, pos, realLen);
+    pos += realLen;
+  }
+
+  @Override
+  public void write(byte[] buf) throws IOException {
+    write(buf, 0, buf.length);
   }
 }

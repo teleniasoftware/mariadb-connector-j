@@ -54,22 +54,14 @@ package org.mariadb.jdbc;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import org.mariadb.jdbc.internal.logging.Logger;
-import org.mariadb.jdbc.internal.logging.LoggerFactory;
-import org.mariadb.jdbc.internal.util.constant.HaMode;
-import org.mariadb.jdbc.internal.util.constant.ParameterConstant;
+import java.util.Objects;
+import org.mariadb.jdbc.util.constants.HaMode;
 
 public class HostAddress {
 
-  private static final Logger logger = LoggerFactory.getLogger(HostAddress.class);
-
   public String host;
   public int port;
-  public String type = null;
-
-  private HostAddress() {}
+  public Boolean master;
 
   /**
    * Constructor. type is master.
@@ -80,7 +72,7 @@ public class HostAddress {
   public HostAddress(String host, int port) {
     this.host = host;
     this.port = port;
-    this.type = ParameterConstant.TYPE_MASTER;
+    this.master = null;
   }
 
   /**
@@ -88,12 +80,12 @@ public class HostAddress {
    *
    * @param host host
    * @param port port
-   * @param type type
+   * @param master is master
    */
-  public HostAddress(String host, int port, String type) {
+  public HostAddress(String host, int port, Boolean master) {
     this.host = host;
     this.port = port;
-    this.type = type;
+    this.master = master;
   }
 
   /**
@@ -115,62 +107,53 @@ public class HostAddress {
     int size = tokens.length;
     List<HostAddress> arr = new ArrayList<>(size);
 
-    // Aurora using cluster end point mustn't have any other host
-    if (haMode == HaMode.AURORA) {
-      Pattern clusterPattern =
-          Pattern.compile(
-              "(.+)\\.(?:cluster-|cluster-ro-)([a-z0-9]+\\.[a-z0-9\\-]+\\.rds\\.amazonaws\\.com)",
-              Pattern.CASE_INSENSITIVE);
-      Matcher matcher = clusterPattern.matcher(spec);
-
-      if (!matcher.find()) {
-        logger.warn(
-            "Aurora recommended connection URL must only use cluster end-point like "
-                + "\"jdbc:mariadb:aurora://xx.cluster-yy.zz.rds.amazonaws.com\". "
-                + "Using end-point permit auto-discovery of new replicas");
-      }
-    }
-
-    for (String token : tokens) {
+    for (int i = 0; i < tokens.length; i++) {
+      String token = tokens[i];
       if (token.startsWith("address=")) {
-        arr.add(parseParameterHostAddress(token));
+        arr.add(parseParameterHostAddress(token, haMode, i == 0));
       } else {
-        arr.add(parseSimpleHostAddress(token));
+        arr.add(parseSimpleHostAddress(token, haMode, i == 0));
       }
     }
 
-    if (haMode == HaMode.REPLICATION) {
-      for (int i = 0; i < size; i++) {
-        if (i == 0 && arr.get(i).type == null) {
-          arr.get(i).type = ParameterConstant.TYPE_MASTER;
-        } else if (i != 0 && arr.get(i).type == null) {
-          arr.get(i).type = ParameterConstant.TYPE_SLAVE;
-        }
-      }
-    }
     return arr;
   }
 
-  private static HostAddress parseSimpleHostAddress(String str) {
-    HostAddress result = new HostAddress();
+  private static HostAddress parseSimpleHostAddress(String str, HaMode haMode, boolean first) {
+    String host = null;
+    int port = 3306;
+    Boolean master = null;
+
     if (str.charAt(0) == '[') {
       /* IPv6 addresses in URLs are enclosed in square brackets */
       int ind = str.indexOf(']');
-      result.host = str.substring(1, ind);
+      host = str.substring(1, ind);
       if (ind != (str.length() - 1) && str.charAt(ind + 1) == ':') {
-        result.port = getPort(str.substring(ind + 2));
+        port = getPort(str.substring(ind + 2));
       }
     } else if (str.contains(":")) {
       /* Parse host:port */
       String[] hostPort = str.split(":");
-      result.host = hostPort[0];
-      result.port = getPort(hostPort[1]);
+      host = hostPort[0];
+      port = getPort(hostPort[1]);
     } else {
       /* Just host name is given */
-      result.host = str;
-      result.port = 3306;
+      host = str;
     }
-    return result;
+
+    if (master == null) {
+      switch (haMode) {
+        case REPLICATION:
+          master = first;
+          break;
+
+        default:
+          master = true;
+          break;
+      }
+    }
+
+    return new HostAddress(host, port, master);
   }
 
   private static int getPort(String portString) {
@@ -181,8 +164,11 @@ public class HostAddress {
     }
   }
 
-  private static HostAddress parseParameterHostAddress(String str) {
-    HostAddress result = new HostAddress();
+  private static HostAddress parseParameterHostAddress(String str, HaMode haMode, boolean first) {
+    String host = null;
+    int port = 3306;
+    Boolean master = null;
+
     String[] array = str.split("(?=\\()|(?<=\\))");
     for (int i = 1; i < array.length; i++) {
       String[] token = array[i].replace("(", "").replace(")", "").trim().split("=");
@@ -192,17 +178,33 @@ public class HostAddress {
       }
       String key = token[0].toLowerCase();
       String value = token[1].toLowerCase();
-      if ("host".equals(key)) {
-        result.host = value.replace("[", "").replace("]", "");
-      } else if ("port".equals(key)) {
-        result.port = getPort(value);
-      } else if ("type".equals(key)
-          && (value.equals(ParameterConstant.TYPE_MASTER)
-              || value.equals(ParameterConstant.TYPE_SLAVE))) {
-        result.type = value;
+
+      switch (key) {
+        case "host":
+          host = value.replace("[", "").replace("]", "");
+          break;
+        case "port":
+          port = getPort(value);
+          break;
+        case "type":
+          master = "master".equals(key);
+          break;
       }
     }
-    return result;
+
+    if (master == null) {
+      switch (haMode) {
+        case REPLICATION:
+          master = first;
+          break;
+
+        default:
+          master = true;
+          break;
+      }
+    }
+
+    return new HostAddress(host, port, master);
   }
 
   /**
@@ -214,13 +216,13 @@ public class HostAddress {
   public static String toString(List<HostAddress> addrs) {
     StringBuilder str = new StringBuilder();
     for (int i = 0; i < addrs.size(); i++) {
-      if (addrs.get(i).type != null) {
+      if (addrs.get(i).master != null) {
         str.append("address=(host=")
             .append(addrs.get(i).host)
             .append(")(port=")
             .append(addrs.get(i).port)
             .append(")(type=")
-            .append(addrs.get(i).type)
+            .append(addrs.get(i).master ? "master" : "slave")
             .append(")");
       } else {
         boolean isIPv6 = addrs.get(i).host != null && addrs.get(i).host.contains(":");
@@ -244,13 +246,13 @@ public class HostAddress {
   public static String toString(HostAddress[] addrs) {
     StringBuilder str = new StringBuilder();
     for (int i = 0; i < addrs.length; i++) {
-      if (addrs[i].type != null) {
+      if (addrs[i].master != null) {
         str.append("address=(host=")
             .append(addrs[i].host)
             .append(")(port=")
             .append(addrs[i].port)
             .append(")(type=")
-            .append(addrs[i].type)
+            .append(addrs[i].master ? "master" : "slave")
             .append(")");
       } else {
         boolean isIPv6 = addrs[i].host != null && addrs[i].host.contains(":");
@@ -266,37 +268,23 @@ public class HostAddress {
 
   @Override
   public String toString() {
-    return "HostAddress{"
-        + "host='"
-        + host
-        + '\''
-        + ", port="
-        + port
-        + ((type != null) ? (", type='" + type + "'") : "")
-        + "}";
+    return String.format(
+        "address=(host=%s)(port=%s)%s",
+        host, port, ((master != null) ? ("(type=" + (master ? "master)" : "slave)")) : ""));
   }
 
   @Override
-  public boolean equals(Object obj) {
-    if (this == obj) {
-      return true;
-    }
-    if (obj == null || getClass() != obj.getClass()) {
-      return false;
-    }
-
-    HostAddress that = (HostAddress) obj;
-
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    HostAddress that = (HostAddress) o;
     return port == that.port
-        && (host != null
-            ? host.equals(that.host)
-            : that.host == null && !(type != null ? !type.equals(that.type) : that.type != null));
+        && Objects.equals(host, that.host)
+        && Objects.equals(master, that.master);
   }
 
   @Override
   public int hashCode() {
-    int result = host != null ? host.hashCode() : 0;
-    result = 31 * result + port;
-    return result;
+    return Objects.hash(host, port, master);
   }
 }

@@ -60,15 +60,19 @@
   <artifactId>mariadb-java-client</artifactId>
   <packaging>jar</packaging>
   <name>mariadb-java-client</name>
-  <version>2.6.1-SNAPSHOT</version>
+  <version>3.0.0-SNAPSHOT</version>
   <description>JDBC driver for MariaDB and MySQL</description>
   <url>https://mariadb.com/kb/en/mariadb/about-mariadb-connector-j/</url>
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <jna.version>5.5.0</jna.version>
+    <jmh.version>1.23</jmh.version>
+    <junit.version>5.6.2</junit.version>
+    <assertj.version>3.15.0</assertj.version>
     <osgi.version>6.0.0</osgi.version>
     <osgi.compendium.version>5.0.0</osgi.compendium.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <logback.version>1.2.3</logback.version>
   </properties>
 
   <licenses>
@@ -109,6 +113,29 @@
     </snapshotRepository>
   </distributionManagement>
 
+  <dependencyManagement>
+    <dependencies>
+
+      <dependency>
+        <groupId>org.junit</groupId>
+        <artifactId>junit-bom</artifactId>
+        <version>${junit.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+      <dependency>
+        <groupId>com.amazonaws</groupId>
+        <artifactId>aws-java-sdk-bom</artifactId>
+        <version>1.11.788</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+    </dependencies>
+
+  </dependencyManagement>
+
   <build>
     <resources>
       <resource>
@@ -117,6 +144,11 @@
       </resource>
     </resources>
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>2.22.2</version>
+      </plugin>
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>
@@ -138,62 +170,29 @@
       </plugin>
       <plugin>
         <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.6.0</version>
+        <version>3.8.1</version>
         <configuration>
           <source>1.8</source>
           <target>1.8</target>
+          <showWarnings>true</showWarnings>
           <compilerArgs>
-            <arg>-Xlint:all,-options,-path</arg>
+            <arg>-Xlint:all,-options,-path,-processing</arg>
           </compilerArgs>
         </configuration>
       </plugin>
-
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-javadoc-plugin</artifactId>
         <version>3.1.1</version>
         <configuration>
           <source>8</source>
+          <excludePackageNames>
+            org.mariadb.jdbc.client,org.mariadb.jdbc.codec,org.mariadb.jdbc.message,org.mariadb.jdbc.util
+          </excludePackageNames>
         </configuration>
         <executions>
           <execution>
             <id>attach-javadocs</id>
-            <phase>prepare-package</phase>
-            <goals>
-              <goal>jar</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-jar-plugin</artifactId>
-        <version>3.2.0</version>
-        <configuration>
-          <archive>
-            <manifestFile>src/main/resources/META-INF/MANIFEST.MF</manifestFile>
-            <manifestEntries>
-              <Bundle-Version>${project.version}</Bundle-Version>
-              <Bundle-ManifestVersion>2</Bundle-ManifestVersion>
-              <Bundle-Name>mariadb-java-client</Bundle-Name>
-              <Bundle-SymbolicName>org.mariadb.jdbc</Bundle-SymbolicName>
-              <Automatic-Module-Name>org.mariadb.jdbc</Automatic-Module-Name>
-              <Export-Package>org.mariadb.jdbc</Export-Package>
-              <Import-Package>
-                org.osgi.framework,javax.naming,javax.management,javax.sql,javax.net;resolution:=optional,javax.net.ssl;resolution:=optional,javax.transaction.xa;resolution:=optional,waffle.windows.auth;resolution:=optional,waffle.windows.auth.impl;resolution:=optional
-              </Import-Package>
-              <Bundle-Activator>org.mariadb.jdbc.internal.osgi.MariaDbActivator</Bundle-Activator>
-            </manifestEntries>
-          </archive>
-        </configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-source-plugin</artifactId>
-        <version>3.2.1</version>
-        <executions>
-          <execution>
-            <!--package phase-->
             <goals>
               <goal>jar</goal>
             </goals>
@@ -216,8 +215,6 @@
           <autoReleaseAfterClose>false</autoReleaseAfterClose>
         </configuration>
       </plugin>
-
-
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-gpg-plugin</artifactId>
@@ -250,50 +247,49 @@
     <dependency>
       <groupId>com.github.waffle</groupId>
       <artifactId>waffle-jna</artifactId>
-      <version>2.2.1</version>
+      <version>1.9.1</version>
       <optional>true</optional>
     </dependency>
-
     <dependency>
-      <groupId>junit</groupId>
-      <artifactId>junit</artifactId>
-      <version>4.13</version>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <version>${assertj.version}</version>
       <scope>test</scope>
     </dependency>
+    <!--    <dependency>-->
+    <!--      <groupId>org.junit.jupiter</groupId>-->
+    <!--      <artifactId>junit-jupiter-api</artifactId>-->
+    <!--      <scope>test</scope>-->
+    <!--    </dependency>-->
+    <!--    <dependency>-->
+    <!--      <groupId>org.junit.jupiter</groupId>-->
+    <!--      <artifactId>junit-jupiter-params</artifactId>-->
+    <!--      <scope>test</scope>-->
+    <!--    </dependency>-->
     <dependency>
-      <groupId>net.java.dev.jna</groupId>
-      <artifactId>jna</artifactId>
-      <version>${jna.version}</version>
-      <optional>true</optional>
-    </dependency>
-    <dependency>
-      <groupId>net.java.dev.jna</groupId>
-      <artifactId>jna-platform</artifactId>
-      <version>${jna.version}</version>
-      <optional>true</optional>
-    </dependency>
-    <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-api</artifactId>
-      <version>[1.4.0,1.7.25]</version>
-      <optional>true</optional>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-engine</artifactId>
+      <scope>test</scope>
     </dependency>
 
     <dependency>
       <groupId>ch.qos.logback</groupId>
       <artifactId>logback-classic</artifactId>
-      <version>1.2.3</version>
+      <version>${logback.version}</version>
       <scope>test</scope>
-      <optional>true</optional>
     </dependency>
-
-    <dependency>
-      <groupId>com.amazonaws</groupId>
-      <artifactId>aws-java-sdk-rds</artifactId>
-      <version>1.11.734</version>
-      <optional>true</optional>
-    </dependency>
-
+<!--    <dependency>-->
+<!--      <groupId>net.java.dev.jna</groupId>-->
+<!--      <artifactId>jna</artifactId>-->
+<!--      <version>${jna.version}</version>-->
+<!--      <optional>true</optional>-->
+<!--    </dependency>-->
+<!--    <dependency>-->
+<!--      <groupId>net.java.dev.jna</groupId>-->
+<!--      <artifactId>jna-platform</artifactId>-->
+<!--      <version>${jna.version}</version>-->
+<!--      <optional>true</optional>-->
+<!--    </dependency>-->
     <dependency>
       <groupId>org.osgi</groupId>
       <artifactId>org.osgi.core</artifactId>
@@ -305,6 +301,16 @@
       <artifactId>org.osgi.compendium</artifactId>
       <version>${osgi.compendium.version}</version>
       <scope>provided</scope>
+    </dependency>
+<!--    <dependency>-->
+<!--      <groupId>com.amazonaws</groupId>-->
+<!--      <artifactId>aws-java-sdk-rds</artifactId>-->
+<!--      <optional>true</optional>-->
+<!--    </dependency>-->
+    <dependency>
+      <groupId>com.amazonaws</groupId>
+      <artifactId>aws-java-sdk-rds</artifactId>
+      <optional>true</optional>
     </dependency>
   </dependencies>
 </project>

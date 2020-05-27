@@ -57,17 +57,23 @@ import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
-import org.mariadb.jdbc.internal.util.DeRegister;
-import org.mariadb.jdbc.internal.util.constant.HaMode;
-import org.mariadb.jdbc.internal.util.constant.Version;
-import org.mariadb.jdbc.util.DefaultOptions;
-import org.mariadb.jdbc.util.Options;
+import org.mariadb.jdbc.util.Version;
+import org.mariadb.jdbc.util.constants.HaMode;
+import org.mariadb.jdbc.util.options.DefaultOptions;
+import org.mariadb.jdbc.util.options.Options;
 
 public final class Driver implements java.sql.Driver {
 
   static {
     try {
-      DriverManager.registerDriver(new Driver(), new DeRegister());
+      DriverManager.registerDriver(
+          new Driver(),
+          new DriverAction() {
+            @Override
+            public void deregister() {
+              // for future use
+            }
+          });
     } catch (SQLException e) {
       throw new RuntimeException("Could not register driver", e);
     }
@@ -82,11 +88,15 @@ public final class Driver implements java.sql.Driver {
    */
   public Connection connect(final String url, final Properties props) throws SQLException {
 
-    UrlParser urlParser = UrlParser.parse(url, props);
-    if (urlParser == null || urlParser.getHostAddresses() == null) {
+    Configuration configuration = Configuration.parse(url, props);
+    if (configuration == null || configuration.getHostAddresses() == null) {
       return null;
     } else {
-      return MariaDbConnection.newConnection(urlParser, null);
+      if (configuration.getHostAddresses().size() > 0) {
+        // TODO implement multi host
+        return new Connection(configuration, configuration.getHostAddresses().get(0));
+      }
+      return new Connection(configuration, null);
     }
   }
 
@@ -98,7 +108,7 @@ public final class Driver implements java.sql.Driver {
    */
   @Override
   public boolean acceptsURL(String url) {
-    return UrlParser.acceptsUrl(url);
+    return Configuration.acceptsUrl(url);
   }
 
   /**
@@ -112,11 +122,11 @@ public final class Driver implements java.sql.Driver {
   public DriverPropertyInfo[] getPropertyInfo(String url, Properties info) throws SQLException {
     Options options;
     if (url != null && !url.isEmpty()) {
-      UrlParser urlParser = UrlParser.parse(url, info);
-      if (urlParser == null || urlParser.getOptions() == null) {
+      Configuration configuration = Configuration.parse(url, info);
+      if (configuration == null || configuration.getOptions() == null) {
         return new DriverPropertyInfo[0];
       }
-      options = urlParser.getOptions();
+      options = configuration.getOptions();
     } else {
       options = DefaultOptions.parse(HaMode.NONE, "", info, null);
     }

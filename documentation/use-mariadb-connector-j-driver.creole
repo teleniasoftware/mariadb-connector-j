@@ -159,8 +159,8 @@ See [[use-mariadb-connector-j-driver.creole#using-pooling|using pooling]] for mo
 |=tcpNoDelay|Sets corresponding option on the connection socket.\\//since 1.0.0//|
 |=tcpKeepAlive|Sets corresponding option on the connection socket.\\//since 1.0.0//|
 |=tcpAbortiveClose|Sets corresponding option on the connection socket.\\//since 1.1.1//|
-|=tcpRcvBuf| set buffer size for TCP buffer (SO_RCVBUF).\\//since 1.0.0//|
-|=tcpSndBuf| set buffer size for TCP buffer (SO_SNDBUF).\\//since 1.0.0//|
+|=tcpRcvBuf| set buf size for TCP buf (SO_RCVBUF).\\//since 1.0.0//|
+|=tcpSndBuf| set buf size for TCP buf (SO_SNDBUF).\\//since 1.0.0//|
 |=pipe| On Windows, specify named pipe name to connect to mysqld.exe. When using pipe, named pipe can throw an exception ERROR_PIPE_BUSY if all pipe are busy. Please consider setting option connectTimeout too, to permit retry connection in those particular cases. \\//since 1.1.3//|
 |=tinyInt1isBit| Datatype mapping flag, handle MySQL Tiny as BIT(boolean).\\//Default: true. Since 1.0.0//|
 |=yearIsDateType|Year is date type, rather than numerical.\\//Default: true. Since 1.0.0//|
