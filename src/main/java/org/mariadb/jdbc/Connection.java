@@ -1,5 +1,16 @@
 package org.mariadb.jdbc;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.Socket;
+import java.sql.*;
+import java.util.*;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
+import javax.net.ssl.SSLSocket;
+import javax.sql.*;
 import org.mariadb.jdbc.client.*;
 import org.mariadb.jdbc.client.result.CompleteResult;
 import org.mariadb.jdbc.client.result.Result;
@@ -16,18 +27,6 @@ import org.mariadb.jdbc.util.constants.ConnectionState;
 import org.mariadb.jdbc.util.constants.ServerStatus;
 import org.mariadb.jdbc.util.exceptions.ExceptionFactory;
 import org.mariadb.jdbc.util.options.Options;
-
-import javax.net.ssl.SSLSocket;
-import javax.sql.*;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.Socket;
-import java.sql.*;
-import java.util.*;
-import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReentrantLock;
 
 public class Connection implements java.sql.Connection, PooledConnection {
 
@@ -52,7 +51,8 @@ public class Connection implements java.sql.Connection, PooledConnection {
     this.conf = conf;
     this.exceptionFactory = new ExceptionFactory(this, conf.getOptions(), hostAddress);
 
-    List<String> galeraAllowedStates = conf.getOptions().galeraAllowedState == null
+    List<String> galeraAllowedStates =
+        conf.getOptions().galeraAllowedState == null
             ? Collections.emptyList()
             : Arrays.asList(conf.getOptions().galeraAllowedState.split(","));
     String host = hostAddress != null ? hostAddress.host : null;
@@ -148,7 +148,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
 
     for (char car : charArray) {
       if (lastChar == '\\'
-              && (context.getServerStatus() & ServerStatus.NO_BACKSLASH_ESCAPES) == 0) {
+          && (context.getServerStatus() & ServerStatus.NO_BACKSLASH_ESCAPES) == 0) {
         sqlBuffer.append(car);
         lastChar = car;
         continue;
@@ -324,7 +324,11 @@ public class Connection implements java.sql.Connection, PooledConnection {
       }
     }
 
-    for (;index < input.length && ((input[index] >= 'a' && input[index] <= 'z') || (input[index] >= 'A' && input[index] <= 'Z')); index++) {
+    for (;
+        index < input.length
+            && ((input[index] >= 'a' && input[index] <= 'z')
+                || (input[index] >= 'A' && input[index] <= 'Z'));
+        index++) {
       sb.append(input[index]);
     }
     String func = sb.toString().toLowerCase(Locale.ROOT);
@@ -575,11 +579,16 @@ public class Connection implements java.sql.Connection, PooledConnection {
   }
 
   private void sendQuery(ClientMessage message) throws SQLException {
-    sendQuery(null, message, 0, 0, ResultSet.CONCUR_READ_ONLY , ResultSet.TYPE_FORWARD_ONLY);
+    sendQuery(null, message, 0, 0, ResultSet.CONCUR_READ_ONLY, ResultSet.TYPE_FORWARD_ONLY, false);
   }
 
-  protected List<Completion> sendQuery(Statement stmt, ClientMessage message, int maxRows, int fetchSize,
-                                           int resultSetConcurrency, int resultSetScrollType)
+  protected List<Completion> sendQuery(
+      Statement stmt,
+      ClientMessage message,
+      int maxRows,
+      int fetchSize,
+      int resultSetConcurrency,
+      int resultSetScrollType, boolean closeOnCompletion)
       throws SQLException {
     checkNotClosed();
     if (stream != null) stream.fetchRemaining();
@@ -587,7 +596,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
       writer.initPacket();
       message.encode(writer, context);
       writer.flush();
-      return readResults(stmt, maxRows, fetchSize, resultSetConcurrency, resultSetScrollType);
+      return readResults(stmt, maxRows, fetchSize, resultSetConcurrency, resultSetScrollType, closeOnCompletion);
     } catch (IOException ioException) {
       destroySocket();
       throw exceptionFactory.create(
@@ -597,12 +606,13 @@ public class Connection implements java.sql.Connection, PooledConnection {
     }
   }
 
-  private List<Completion> readResults(Statement stmt, int maxRows, int fetchSize, int resultSetConcurrency,
-                                       int resultSetScrollType) throws SQLException {
+  private List<Completion> readResults(
+      Statement stmt, int maxRows, int fetchSize, int resultSetConcurrency, int resultSetScrollType, boolean closeOnCompletion)
+      throws SQLException {
     List<Completion> completions = new ArrayList<>();
-    readPacket(stmt, completions, maxRows, fetchSize, resultSetConcurrency, resultSetScrollType);
+    readPacket(stmt, completions, maxRows, fetchSize, resultSetConcurrency, resultSetScrollType, closeOnCompletion);
     while ((context.getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0) {
-      readPacket(stmt, completions, maxRows, fetchSize, resultSetConcurrency, resultSetScrollType);
+      readPacket(stmt, completions, maxRows, fetchSize, resultSetConcurrency, resultSetScrollType, closeOnCompletion);
     }
     return completions;
   }
@@ -615,8 +625,12 @@ public class Connection implements java.sql.Connection, PooledConnection {
    *     packets</a>
    */
   public void readPacket(
-          Statement stmt, List<Completion> completions, int maxRows, int fetchSize, int resultSetConcurrency,
-          int resultSetScrollType)
+      Statement stmt,
+      List<Completion> completions,
+      int maxRows,
+      int fetchSize,
+      int resultSetConcurrency,
+      int resultSetScrollType, boolean closeOnCompletion)
       throws SQLException {
     ReadableByteBuf buf;
     try {
@@ -671,20 +685,14 @@ public class Connection implements java.sql.Connection, PooledConnection {
           if (fetchSize != 0) {
             result =
                 new StreamingResult(
-                    true,
-                    ci,
-                    reader,
-                    context,
-                    maxRows,
-                    fetchSize,
-                    lock,
-                    resultSetScrollType);
+                        stmt, true, ci, reader, context, maxRows, fetchSize, lock, resultSetScrollType,
+                        closeOnCompletion);
             if (!result.loaded()) {
               stream = stmt;
             }
           } else {
-            result =
-                new CompleteResult(true, ci, reader, context, maxRows, resultSetScrollType);
+            result = new CompleteResult(stmt, true, ci, reader, context, maxRows, resultSetScrollType,
+                    closeOnCompletion);
             stream = null;
           }
           completions.add(result);
@@ -857,7 +865,8 @@ public class Connection implements java.sql.Connection, PooledConnection {
       if (conf.getOptions().assureReadOnly
           && this.readOnly != readOnly
           && context.getVersion().versionGreaterOrEqual(5, 6, 5)) {
-        sendQuery(new QueryPacket("SET SESSION TRANSACTION " + (readOnly ? "READ ONLY" : "READ WRITE")));
+        sendQuery(
+            new QueryPacket("SET SESSION TRANSACTION " + (readOnly ? "READ ONLY" : "READ WRITE")));
       }
       this.readOnly = readOnly;
       stateFlag |= ConnectionState.STATE_READ_ONLY;
@@ -905,8 +914,10 @@ public class Connection implements java.sql.Connection, PooledConnection {
     String sql = "SELECT @@tx_isolation";
 
     if (!context.getVersion().isMariaDBServer()) {
-      if ((context.getVersion().getMajorVersion() >= 8 && context.getVersion().versionGreaterOrEqual(8, 0, 3))
-              || (context.getVersion().getMajorVersion() < 8 && context.getVersion().versionGreaterOrEqual(5, 7, 20))) {
+      if ((context.getVersion().getMajorVersion() >= 8
+              && context.getVersion().versionGreaterOrEqual(8, 0, 3))
+          || (context.getVersion().getMajorVersion() < 8
+              && context.getVersion().versionGreaterOrEqual(5, 7, 20))) {
         sql = "SELECT @@transaction_isolation";
       }
     }
@@ -929,8 +940,8 @@ public class Connection implements java.sql.Connection, PooledConnection {
 
         default:
           throw exceptionFactory.create(
-                  String.format(
-                          "Could not get transaction isolation level: Invalid value \"%s\"", response));
+              String.format(
+                  "Could not get transaction isolation level: Invalid value \"%s\"", response));
       }
     }
     throw exceptionFactory.create("Failed to retrieve transaction isolation");

@@ -1,12 +1,5 @@
 package org.mariadb.jdbc.client.result;
 
-import org.mariadb.jdbc.client.ConnectionContext;
-import org.mariadb.jdbc.client.PacketReader;
-import org.mariadb.jdbc.client.ReadableByteBuf;
-import org.mariadb.jdbc.codec.DataType;
-import org.mariadb.jdbc.message.server.ColumnDefinitionPacket;
-import org.mariadb.jdbc.util.exceptions.ExceptionFactory;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.sql.ResultSet;
@@ -14,36 +7,46 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.mariadb.jdbc.Statement;
+import org.mariadb.jdbc.client.ConnectionContext;
+import org.mariadb.jdbc.client.PacketReader;
+import org.mariadb.jdbc.client.ReadableByteBuf;
+import org.mariadb.jdbc.codec.DataType;
+import org.mariadb.jdbc.message.server.ColumnDefinitionPacket;
+import org.mariadb.jdbc.util.exceptions.ExceptionFactory;
+
 public class CompleteResult extends Result {
 
   public CompleteResult(
-      boolean text,
+          Statement stmt,
+          boolean text,
       ColumnDefinitionPacket[] metadataList,
       PacketReader reader,
       ConnectionContext context,
       int maxRows,
-      int resultSetScrollType)
+      int resultSetScrollType, boolean closeOnCompletion)
       throws IOException, SQLException {
 
-    super(text, metadataList, reader, context, maxRows, resultSetScrollType);
+    super(stmt, text, metadataList, reader, context, maxRows, resultSetScrollType, closeOnCompletion);
     this.data = new ArrayList<>(10);
     while (readNext()) {}
     loaded = true;
   }
 
   public CompleteResult(
-          ColumnDefinitionPacket[] metadataList,
-          List<ReadableByteBuf> data,
-          ExceptionFactory exceptionFactory) {
+      ColumnDefinitionPacket[] metadataList,
+      List<ReadableByteBuf> data,
+      ExceptionFactory exceptionFactory) {
     super(metadataList, data, exceptionFactory);
   }
 
   public static ResultSet createResultSet(
-          String columnName,
-          DataType columnType,
-          String[] data,
-          ExceptionFactory exceptionFactory) {
-    return createResultSet(new String[]{columnName}, new DataType[] {columnType}, new String[][] {data}, exceptionFactory);
+      String columnName, DataType columnType, String[] data, ExceptionFactory exceptionFactory) {
+    return createResultSet(
+        new String[] {columnName},
+        new DataType[] {columnType},
+        new String[][] {data},
+        exceptionFactory);
   }
   /**
    * Create a result set from given data. Useful for creating "fake" resultSets for
@@ -57,10 +60,10 @@ public class CompleteResult extends Result {
    * @return resultset
    */
   public static ResultSet createResultSet(
-          String[] columnNames,
-          DataType[] columnTypes,
-          String[][] data,
-          ExceptionFactory exceptionFactory) {
+      String[] columnNames,
+      DataType[] columnTypes,
+      String[][] data,
+      ExceptionFactory exceptionFactory) {
 
     int columnNameLength = columnNames.length;
     ColumnDefinitionPacket[] columns = new ColumnDefinitionPacket[columnNameLength];
@@ -125,11 +128,11 @@ public class CompleteResult extends Result {
     }
     if (rowPointer < data.size() - 1) {
       rowPointer++;
-      row.resetRow(data.get(rowPointer));
+      row.setRow(data.get(rowPointer));
       return true;
     } else {
       // all data are reads and pointer is after last
-      row.resetRow(null);
+      row.setRow(null);
       rowPointer = data.size();
       return false;
     }
@@ -141,7 +144,7 @@ public class CompleteResult extends Result {
   }
 
   @Override
-  public void fetchRemaining() throws SQLException { }
+  public void fetchRemaining() throws SQLException {}
 
   @Override
   public boolean isAfterLast() throws SQLException {
@@ -174,13 +177,13 @@ public class CompleteResult extends Result {
   public void beforeFirst() throws SQLException {
     checkClose();
     rowPointer = -1;
-    row.resetRow(null);
+    row.setRow(null);
   }
 
   @Override
   public void afterLast() throws SQLException {
     checkClose();
-    row.resetRow(null);
+    row.setRow(null);
     rowPointer = data.size();
   }
 
@@ -188,7 +191,7 @@ public class CompleteResult extends Result {
   public boolean first() throws SQLException {
     checkClose();
     rowPointer = 0;
-    row.resetRow(data.get(rowPointer));
+    row.setRow(data.get(rowPointer));
     return data.size() > 0;
   }
 
@@ -196,7 +199,7 @@ public class CompleteResult extends Result {
   public boolean last() throws SQLException {
     checkClose();
     rowPointer = data.size() - 1;
-    row.resetRow(data.get(rowPointer));
+    row.setRow(data.get(rowPointer));
     return data.size() > 0;
   }
 
@@ -212,7 +215,7 @@ public class CompleteResult extends Result {
 
     if (idx >= 0 && idx <= data.size()) {
       rowPointer = idx - 1;
-      row.resetRow(data.get(rowPointer));
+      row.setRow(data.get(rowPointer));
       return true;
     }
 
@@ -220,12 +223,12 @@ public class CompleteResult extends Result {
 
       if (idx <= data.size()) {
         rowPointer = idx - 1;
-        row.resetRow(data.get(rowPointer));
+        row.setRow(data.get(rowPointer));
         return true;
       }
 
       rowPointer = data.size(); // go to afterLast() position
-      row.resetRow(null);
+      row.setRow(null);
       return false;
 
     } else {
@@ -233,16 +236,15 @@ public class CompleteResult extends Result {
       if (data.size() + idx >= 0) {
         // absolute position reverse from ending resultSet
         rowPointer = data.size() + idx;
-        row.resetRow(data.get(rowPointer));
+        row.setRow(data.get(rowPointer));
         return true;
       }
 
       rowPointer = -1; // go to before first position
-      row.resetRow(null);
+      row.setRow(null);
       return false;
     }
   }
-
 
   @Override
   public boolean relative(int rows) throws SQLException {
@@ -250,15 +252,15 @@ public class CompleteResult extends Result {
     int newPos = rowPointer + rows;
     if (newPos <= -1) {
       rowPointer = -1;
-      row.resetRow(null);
+      row.setRow(null);
       return false;
     } else if (newPos >= data.size()) {
       rowPointer = data.size();
-      row.resetRow(null);
+      row.setRow(null);
       return false;
     } else {
       rowPointer = newPos;
-      row.resetRow(data.get(rowPointer));
+      row.setRow(data.get(rowPointer));
       return true;
     }
   }
@@ -269,11 +271,11 @@ public class CompleteResult extends Result {
     if (rowPointer > -1) {
       rowPointer--;
       if (rowPointer != -1) {
-        row.resetRow(data.get(rowPointer));
+        row.setRow(data.get(rowPointer));
         return true;
       }
     }
-    row.resetRow(null);
+    row.setRow(null);
     return false;
   }
 
@@ -284,5 +286,4 @@ public class CompleteResult extends Result {
 
   @Override
   public void setFetchSize(int rows) throws SQLException {}
-
 }

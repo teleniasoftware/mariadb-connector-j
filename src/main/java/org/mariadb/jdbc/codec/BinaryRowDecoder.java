@@ -48,13 +48,17 @@ public class BinaryRowDecoder extends RowDecoder {
   }
 
   @Override
-  public void resetRow(ReadableByteBuf buf) {
-    super.resetRow(buf);
+  public void setRow(ReadableByteBuf buf) {
     if (buf != null) {
+      this.buf = buf;
+      this.buf.mark();
       buf.skip(1); // skip 0x00 header
       nullBitmap = new byte[(columnCount + 9) / 8];
       buf.readBytes(nullBitmap);
+    } else {
+      this.buf = null;
     }
+    index = -1;
   }
 
   public boolean wasNull() {

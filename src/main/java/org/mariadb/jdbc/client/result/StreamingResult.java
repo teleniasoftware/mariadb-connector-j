@@ -1,13 +1,14 @@
 package org.mariadb.jdbc.client.result;
 
-import org.mariadb.jdbc.client.ConnectionContext;
-import org.mariadb.jdbc.client.PacketReader;
-import org.mariadb.jdbc.message.server.ColumnDefinitionPacket;
-
 import java.io.IOException;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.concurrent.locks.ReentrantLock;
+
+import org.mariadb.jdbc.Statement;
+import org.mariadb.jdbc.client.ConnectionContext;
+import org.mariadb.jdbc.client.PacketReader;
+import org.mariadb.jdbc.message.server.ColumnDefinitionPacket;
 
 public class StreamingResult extends Result {
 
@@ -16,6 +17,7 @@ public class StreamingResult extends Result {
   private int fetchSize;
 
   public StreamingResult(
+          Statement stmt,
       boolean text,
       ColumnDefinitionPacket[] metadataList,
       PacketReader reader,
@@ -23,10 +25,10 @@ public class StreamingResult extends Result {
       int maxRows,
       int fetchSize,
       ReentrantLock lock,
-      int resultSetScrollType)
+      int resultSetScrollType, boolean closeOnCompletion)
       throws IOException, SQLException {
 
-    super(text, metadataList, reader, context, maxRows, resultSetScrollType);
+    super(stmt, text, metadataList, reader, context, maxRows, resultSetScrollType, closeOnCompletion);
     this.lock = lock;
     this.dataFetchTime = 0;
     this.fetchSize = fetchSize;
@@ -87,7 +89,7 @@ public class StreamingResult extends Result {
     }
     if (rowPointer < data.size() - 1) {
       rowPointer++;
-      row.resetRow(data.get(rowPointer));
+      row.setRow(data.get(rowPointer));
       return true;
     } else {
       if (!loaded) {
@@ -106,31 +108,30 @@ public class StreamingResult extends Result {
           // resultSet has been cleared. next value is pointer 0.
           rowPointer = 0;
           if (data.size() > 0) {
-            row.resetRow(data.get(rowPointer));
+            row.setRow(data.get(rowPointer));
             return true;
           }
-          row.resetRow(null);
+          row.setRow(null);
           return false;
         } else {
           // cursor can move backward, so driver must keep the results.
           // results have been added to current resultSet
           rowPointer++;
           if (data.size() > rowPointer) {
-            row.resetRow(data.get(rowPointer));
+            row.setRow(data.get(rowPointer));
             return true;
           }
-          row.resetRow(null);
+          row.setRow(null);
           return false;
         }
       }
 
       // all data are reads and pointer is after last
       rowPointer = data.size();
-      row.resetRow(null);
+      row.setRow(null);
       return false;
     }
   }
-
 
   @Override
   public boolean isAfterLast() throws SQLException {
@@ -172,7 +173,6 @@ public class StreamingResult extends Result {
     return dataFetchTime == 1 && rowPointer == 0 && data.size() > 0;
   }
 
-
   @Override
   public boolean isLast() throws SQLException {
     checkClose();
@@ -210,7 +210,7 @@ public class StreamingResult extends Result {
     if (resultSetScrollType == TYPE_FORWARD_ONLY) {
       throw exceptionFactory.create("Invalid operation for result set type TYPE_FORWARD_ONLY");
     }
-    row.resetRow(null);
+    row.setRow(null);
     rowPointer = -1;
   }
 
@@ -218,7 +218,7 @@ public class StreamingResult extends Result {
   public void afterLast() throws SQLException {
     checkClose();
     fetchRemaining();
-    row.resetRow(null);
+    row.setRow(null);
     rowPointer = data.size();
   }
 
@@ -232,10 +232,10 @@ public class StreamingResult extends Result {
 
     rowPointer = 0;
     if (data.size() > 0) {
-      row.resetRow(data.get(rowPointer));
+      row.setRow(data.get(rowPointer));
       return true;
     }
-    row.resetRow(null);
+    row.setRow(null);
     return false;
   }
 
@@ -245,11 +245,12 @@ public class StreamingResult extends Result {
     fetchRemaining();
     rowPointer = data.size() - 1;
     if (data.size() > 0) {
-      row.resetRow(data.get(rowPointer));
+      row.setRow(data.get(rowPointer));
       return true;
     }
-    row.resetRow(null);
-    return false;  }
+    row.setRow(null);
+    return false;
+  }
 
   @Override
   public int getRow() throws SQLException {
@@ -270,7 +271,7 @@ public class StreamingResult extends Result {
 
     if (idx >= 0 && idx <= data.size()) {
       rowPointer = idx - 1;
-      row.resetRow(data.get(rowPointer));
+      row.setRow(data.get(rowPointer));
       return true;
     }
 
@@ -281,12 +282,12 @@ public class StreamingResult extends Result {
 
       if (idx <= data.size()) {
         rowPointer = idx - 1;
-        row.resetRow(data.get(rowPointer));
+        row.setRow(data.get(rowPointer));
         return true;
       }
 
       rowPointer = data.size(); // go to afterLast() position
-      row.resetRow(null);
+      row.setRow(null);
       return false;
 
     } else {
@@ -294,15 +295,14 @@ public class StreamingResult extends Result {
       if (data.size() + idx >= 0) {
         // absolute position reverse from ending resultSet
         rowPointer = data.size() + idx;
-        row.resetRow(data.get(rowPointer));
+        row.setRow(data.get(rowPointer));
         return true;
       }
-      row.resetRow(null);
+      row.setRow(null);
       rowPointer = -1; // go to before first position
       return false;
     }
   }
-
 
   @Override
   public boolean relative(int rows) throws SQLException {
@@ -313,15 +313,15 @@ public class StreamingResult extends Result {
     int newPos = rowPointer + rows;
     if (newPos <= -1) {
       rowPointer = -1;
-      row.resetRow(null);
+      row.setRow(null);
       return false;
     } else if (newPos >= data.size()) {
       rowPointer = data.size();
-      row.resetRow(null);
+      row.setRow(null);
       return false;
     } else {
       rowPointer = newPos;
-      row.resetRow(data.get(rowPointer));
+      row.setRow(data.get(rowPointer));
       return true;
     }
   }
@@ -335,11 +335,11 @@ public class StreamingResult extends Result {
     if (rowPointer > -1) {
       rowPointer--;
       if (rowPointer != -1) {
-        row.resetRow(data.get(rowPointer));
+        row.setRow(data.get(rowPointer));
         return true;
       }
     }
-    row.resetRow(null);
+    row.setRow(null);
     return false;
   }
 
@@ -365,5 +365,4 @@ public class StreamingResult extends Result {
     }
     this.fetchSize = fetchSize;
   }
-
 }

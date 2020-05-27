@@ -41,9 +41,13 @@ public abstract class RowDecoder {
     this.columns = columns;
   }
 
-  public void resetRow(ReadableByteBuf buf) {
-    this.buf = buf;
-    if (buf != null) this.buf.mark();
+  public void setRow(ReadableByteBuf buf) {
+    if (buf != null) {
+      this.buf = buf;
+      this.buf.mark();
+    } else {
+      this.buf = null;
+    }
     index = -1;
   }
 
@@ -98,14 +102,14 @@ public abstract class RowDecoder {
     }
     if (index < 1 || index > columnCount) {
       throw new SQLException(
-              String.format(
-                      "Wrong index position. Is %s but must be in 1-%s range", index, columnCount));
+          String.format(
+              "Wrong index position. Is %s but must be in 1-%s range", index, columnCount));
     }
 
     if (wasNull()) {
       if (type.isPrimitive()) {
         throw new SQLException(
-                String.format("Cannot return null for primitive %s", type.getName()));
+            String.format("Cannot return null for primitive %s", type.getName()));
       }
       return null;
     }
@@ -117,10 +121,9 @@ public abstract class RowDecoder {
       return getNoCheck(index - 1, defaultCodec);
     }
 
-
     for (Codec<?> codec : Codecs.LIST) {
       if (codec.canDecode(column, type)) {
-        return getNoCheck(index - 1, (Codec<T>)codec);
+        return getNoCheck(index - 1, (Codec<T>) codec);
       }
     }
 

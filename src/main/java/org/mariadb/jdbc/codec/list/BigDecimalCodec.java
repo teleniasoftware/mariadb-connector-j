@@ -53,8 +53,7 @@ public class BigDecimalCodec implements Codec<BigDecimal> {
 
   @Override
   public BigDecimal decodeText(ReadableByteBuf buf, int length, ColumnDefinitionPacket column) {
-    String value = buf.readString(length);
-    return new BigDecimal(value);
+    return new BigDecimal(buf.readString(length));
   }
 
   @Override

@@ -53,15 +53,14 @@ public class BigIntegerCodec implements Codec<BigInteger> {
 
   @Override
   public BigInteger decodeText(ReadableByteBuf buf, int length, ColumnDefinitionPacket column) {
+    String val = buf.readAscii(length);
     switch (column.getType()) {
       case DECIMAL:
       case DOUBLE:
       case FLOAT:
-        String value = buf.readAscii(length);
-        return new BigDecimal(value).toBigInteger();
+        return new BigDecimal(val).toBigInteger();
 
       default:
-        String val = buf.readAscii(length);
         return new BigInteger(val);
     }
   }

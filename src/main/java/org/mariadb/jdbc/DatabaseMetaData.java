@@ -1,18 +1,17 @@
 package org.mariadb.jdbc;
 
+import java.sql.*;
+import java.sql.Statement;
+import java.text.ParseException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import org.mariadb.jdbc.client.result.CompleteResult;
 import org.mariadb.jdbc.client.result.Result;
 import org.mariadb.jdbc.codec.DataType;
 import org.mariadb.jdbc.util.Version;
 import org.mariadb.jdbc.util.constants.ServerStatus;
 import org.mariadb.jdbc.util.options.Options;
-
-import java.sql.Statement;
-import java.sql.*;
-import java.text.ParseException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 
 public class DatabaseMetaData implements java.sql.DatabaseMetaData {
 

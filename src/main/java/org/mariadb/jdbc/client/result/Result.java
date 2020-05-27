@@ -1,18 +1,5 @@
 package org.mariadb.jdbc.client.result;
 
-import org.mariadb.jdbc.client.Completion;
-import org.mariadb.jdbc.client.ConnectionContext;
-import org.mariadb.jdbc.client.PacketReader;
-import org.mariadb.jdbc.client.ReadableByteBuf;
-import org.mariadb.jdbc.codec.Codec;
-import org.mariadb.jdbc.codec.DataType;
-import org.mariadb.jdbc.codec.RowDecoder;
-import org.mariadb.jdbc.codec.TextRowDecoder;
-import org.mariadb.jdbc.codec.list.*;
-import org.mariadb.jdbc.message.server.ColumnDefinitionPacket;
-import org.mariadb.jdbc.message.server.ErrorPacket;
-import org.mariadb.jdbc.util.exceptions.ExceptionFactory;
-
 import java.io.*;
 import java.math.BigDecimal;
 import java.net.MalformedURLException;
@@ -22,16 +9,26 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
-import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.locks.ReentrantLock;
+import org.mariadb.jdbc.client.Completion;
+import org.mariadb.jdbc.client.ConnectionContext;
+import org.mariadb.jdbc.client.PacketReader;
+import org.mariadb.jdbc.client.ReadableByteBuf;
+import org.mariadb.jdbc.codec.Codec;
+import org.mariadb.jdbc.codec.RowDecoder;
+import org.mariadb.jdbc.codec.TextRowDecoder;
+import org.mariadb.jdbc.codec.list.*;
+import org.mariadb.jdbc.message.server.ColumnDefinitionPacket;
+import org.mariadb.jdbc.message.server.ErrorPacket;
+import org.mariadb.jdbc.util.exceptions.ExceptionFactory;
 
 public abstract class Result implements Completion, ResultSet {
 
   private final boolean text;
   private final ColumnDefinitionPacket[] metadataList;
+  private final int maxIndex;
   private final ConnectionContext context;
   private final int maxRows;
   private Statement statement;
@@ -45,22 +42,27 @@ public abstract class Result implements Completion, ResultSet {
   protected boolean loaded;
   protected int rowPointer = -1;
   protected boolean closed;
+  private final boolean closeOnCompletion;
 
   public Result(
-      boolean text,
-      ColumnDefinitionPacket[] metadataList,
-      PacketReader reader,
-      ConnectionContext context,
-      int maxRows,
-      int resultSetScrollType) {
+          org.mariadb.jdbc.Statement stmt,
+          boolean text,
+          ColumnDefinitionPacket[] metadataList,
+          PacketReader reader,
+          ConnectionContext context,
+          int maxRows,
+          int resultSetScrollType, boolean closeOnCompletion) {
+    this.statement = stmt;
+    this.closeOnCompletion = closeOnCompletion;
     this.text = text;
     this.metadataList = metadataList;
+    this.maxIndex = this.metadataList.length;
     this.reader = reader;
     this.exceptionFactory = context.getExceptionFactory();
     this.context = context;
     this.maxRows = maxRows;
     this.resultSetScrollType = resultSetScrollType;
-    row = new TextRowDecoder(metadataList.length, metadataList);
+    row = new TextRowDecoder(this.maxIndex, metadataList);
   }
 
   public Result(
@@ -69,13 +71,16 @@ public abstract class Result implements Completion, ResultSet {
       ExceptionFactory exceptionFactory) {
     this.text = true;
     this.metadataList = metadataList;
+    this.maxIndex = this.metadataList.length;
     this.reader = null;
     this.exceptionFactory = exceptionFactory;
     this.context = null;
     this.data = data;
     this.maxRows = 0;
+    this.statement = null;
     this.resultSetScrollType = TYPE_FORWARD_ONLY;
-    row = new TextRowDecoder(metadataList.length, metadataList);
+    this.closeOnCompletion = false;
+    row = new TextRowDecoder(maxIndex, metadataList);
   }
 
   protected boolean readNext() throws SQLException, IOException {
@@ -115,7 +120,7 @@ public abstract class Result implements Completion, ResultSet {
         // continue reading rows
 
       default:
-        if (maxRows == 0 || (maxRows > 0 &&  currRows++ < maxRows)) {
+        if (maxRows == 0 || (maxRows > 0 && currRows++ < maxRows)) {
           data.add(buf);
         } else {
           skipRemaining();
@@ -176,7 +181,11 @@ public abstract class Result implements Completion, ResultSet {
   @Override
   public void close() throws SQLException {
     this.closed = true;
+    if (closeOnCompletion) {
+      statement.close();
+    }
   }
+
   @Override
   public boolean wasNull() throws SQLException {
     return row.wasNull();
@@ -384,18 +393,19 @@ public abstract class Result implements Completion, ResultSet {
 
   @Override
   public ResultSetMetaData getMetaData() throws SQLException {
-    //TODO implement medata
+    // TODO implement medata
     return null;
   }
 
   @Override
   public Object getObject(int columnIndex) throws SQLException {
-    if (columnIndex < 1 || columnIndex > metadataList.length) {
+    if (columnIndex < 1 || columnIndex > maxIndex) {
       throw new SQLException(
-              String.format(
-                      "Wrong index position. Is %s but must be in 1-%s range", columnIndex, metadataList.length));
+          String.format(
+              "Wrong index position. Is %s but must be in 1-%s range",
+              columnIndex, maxIndex));
     }
-    Codec defaultCodec = metadataList[columnIndex].getDefaultCodec();
+    Codec defaultCodec = metadataList[columnIndex - 1].getDefaultCodec();
     return row.get(columnIndex, defaultCodec);
   }
 
@@ -463,7 +473,6 @@ public abstract class Result implements Completion, ResultSet {
 
   public abstract boolean previous() throws SQLException;
 
-
   @Override
   public int getFetchDirection() {
     return FETCH_UNKNOWN;
@@ -473,10 +482,9 @@ public abstract class Result implements Completion, ResultSet {
   public void setFetchDirection(int direction) throws SQLException {
     if (direction == FETCH_REVERSE) {
       throw exceptionFactory.create(
-              "Invalid operation. Allowed direction are ResultSet.FETCH_FORWARD and ResultSet.FETCH_UNKNOWN");
+          "Invalid operation. Allowed direction are ResultSet.FETCH_FORWARD and ResultSet.FETCH_UNKNOWN");
     }
   }
-
 
   @Override
   public int getType() {
@@ -669,8 +677,7 @@ public abstract class Result implements Completion, ResultSet {
   }
 
   @Override
-  public void updateAsciiStream(String columnLabel, InputStream x, int length)
-      throws SQLException {
+  public void updateAsciiStream(String columnLabel, InputStream x, int length) throws SQLException {
     throw exceptionFactory.notSupported("Not supported when using CONCUR_READ_ONLY concurrency");
   }
 
@@ -749,7 +756,7 @@ public abstract class Result implements Completion, ResultSet {
   @Override
   public Object getObject(int columnIndex, Map<String, Class<?>> map) throws SQLException {
     throw exceptionFactory.notSupported(
-            "Method ResultSet.getObject(int columnIndex, Map<String, Class<?>> map) not supported");
+        "Method ResultSet.getObject(int columnIndex, Map<String, Class<?>> map) not supported");
   }
 
   @Override
@@ -775,7 +782,7 @@ public abstract class Result implements Completion, ResultSet {
   @Override
   public Object getObject(String columnLabel, Map<String, Class<?>> map) throws SQLException {
     throw exceptionFactory.notSupported(
-            "Method ResultSet.getObject(String columnLabel, Map<String, Class<?>> map) not supported");
+        "Method ResultSet.getObject(String columnLabel, Map<String, Class<?>> map) not supported");
   }
 
   @Override
@@ -841,7 +848,7 @@ public abstract class Result implements Completion, ResultSet {
   @Override
   public URL getURL(int columnIndex) throws SQLException {
     String s = row.get(columnIndex, StringCodec.INSTANCE);
-    if (s == null) return  null;
+    if (s == null) return null;
     try {
       return new URL(s);
     } catch (MalformedURLException e) {
