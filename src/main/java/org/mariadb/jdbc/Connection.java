@@ -22,6 +22,7 @@ import org.mariadb.jdbc.message.server.InitialHandshakePacket;
 import org.mariadb.jdbc.message.server.OkPacket;
 import org.mariadb.jdbc.plugin.credential.Credential;
 import org.mariadb.jdbc.plugin.credential.CredentialPlugin;
+import org.mariadb.jdbc.util.NativeSql;
 import org.mariadb.jdbc.util.constants.Capabilities;
 import org.mariadb.jdbc.util.constants.ConnectionState;
 import org.mariadb.jdbc.util.constants.ServerStatus;
@@ -38,17 +39,20 @@ public class Connection implements java.sql.Connection, PooledConnection {
   private final List<ConnectionEventListener> connectionEventListeners = new ArrayList<>();
   private final List<StatementEventListener> statementEventListeners = new ArrayList<>();
   private final Configuration conf;
+  private final HostAddress hostAddress;
   private final ExceptionFactory exceptionFactory;
 
   private PacketWriter writer;
   private PacketReader reader;
   private int lowercaseTableNames = -1;
   private boolean readOnly;
+  private boolean canUseServerTimeout;
   private int stateFlag = 0;
   private Statement stream = null;
 
   public Connection(Configuration conf, HostAddress hostAddress) throws SQLException {
     this.conf = conf;
+    this.hostAddress = hostAddress;
     this.exceptionFactory = new ExceptionFactory(this, conf.getOptions(), hostAddress);
 
     List<String> galeraAllowedStates =
@@ -69,6 +73,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
       this.context = new ConnectionContext(handshake, conf, this.exceptionFactory);
       this.reader.setServerThreadId(handshake.getThreadId(), hostAddress);
       this.writer.setServerThreadId(handshake.getThreadId(), hostAddress);
+      this.canUseServerTimeout = this.context.getVersion().versionGreaterOrEqual(10, 1, 2);
 
       long clientCapabilities =
           ConnectionHelper.initializeClientCapabilities(conf, this.context.getServerCapabilities());
@@ -127,315 +132,6 @@ public class Connection implements java.sql.Connection, PooledConnection {
         && Boolean.TRUE.equals(hostAddress.master)
         && !galeraAllowedStates.isEmpty()) {
       galeraStateValidation();
-    }
-  }
-
-  private static String nativeSql(String sql, ConnectionContext context) throws SQLException {
-    if (!sql.contains("{")) {
-      return sql;
-    }
-
-    StringBuilder escapeSequenceBuf = new StringBuilder();
-    StringBuilder sqlBuffer = new StringBuilder();
-
-    char[] charArray = sql.toCharArray();
-    char lastChar = 0;
-    boolean inQuote = false;
-    char quoteChar = 0;
-    boolean inComment = false;
-    boolean isSlashSlashComment = false;
-    int inEscapeSeq = 0;
-
-    for (char car : charArray) {
-      if (lastChar == '\\'
-          && (context.getServerStatus() & ServerStatus.NO_BACKSLASH_ESCAPES) == 0) {
-        sqlBuffer.append(car);
-        lastChar = car;
-        continue;
-      }
-
-      switch (car) {
-        case '\'':
-        case '"':
-        case '`':
-          if (!inComment) {
-            if (inQuote) {
-              if (quoteChar == car) {
-                inQuote = false;
-              }
-            } else {
-              inQuote = true;
-              quoteChar = car;
-            }
-          }
-          break;
-
-        case '*':
-          if (!inQuote && !inComment && lastChar == '/') {
-            inComment = true;
-            isSlashSlashComment = false;
-          }
-          break;
-
-        case '-':
-        case '/':
-          if (!inQuote) {
-            if (inComment) {
-              if (lastChar == '*' && !isSlashSlashComment) {
-                inComment = false;
-              }
-            } else {
-              if (lastChar == car) {
-                inComment = true;
-                isSlashSlashComment = true;
-              }
-            }
-          }
-          break;
-        case '\n':
-          if (inComment && isSlashSlashComment) {
-            // slash-slash and dash-dash comments ends with the end of line
-            inComment = false;
-          }
-          break;
-        case '{':
-          if (!inQuote && !inComment) {
-            inEscapeSeq++;
-          }
-          break;
-
-        case '}':
-          if (!inQuote && !inComment) {
-            inEscapeSeq--;
-            if (inEscapeSeq == 0) {
-              escapeSequenceBuf.append(car);
-              sqlBuffer.append(resolveEscapes(escapeSequenceBuf.toString(), context));
-              escapeSequenceBuf.setLength(0);
-              lastChar = car;
-              continue;
-            }
-          }
-          break;
-
-        default:
-          break;
-      }
-      lastChar = car;
-      if (inEscapeSeq > 0) {
-        escapeSequenceBuf.append(car);
-      } else {
-        sqlBuffer.append(car);
-      }
-    }
-    if (inEscapeSeq > 0) {
-      throw new SQLException(
-          "Invalid escape sequence , missing closing '}' character in '" + sqlBuffer);
-    }
-    return sqlBuffer.toString();
-  }
-
-  private static String resolveEscapes(String escaped, ConnectionContext context)
-      throws SQLException {
-    int endIndex = escaped.length() - 1;
-    String escapedLower = escaped.toLowerCase(Locale.ROOT);
-    if (escaped.startsWith("{fn ")) {
-      String resolvedParams = replaceFunctionParameter(escaped.substring(4, endIndex), context);
-      return nativeSql(resolvedParams, context);
-    } else if (escapedLower.startsWith("{oj ")) {
-      // Outer join
-      // the server supports "oj" in any case, even "oJ"
-      return nativeSql(escaped.substring(4, endIndex), context);
-    } else if (escaped.startsWith("{d ")) {
-      // date literal
-      return escaped.substring(3, endIndex);
-    } else if (escaped.startsWith("{t ")) {
-      // time literal
-      return escaped.substring(3, endIndex);
-    } else if (escaped.startsWith("{ts ")) {
-      // timestamp literal
-      return escaped.substring(4, endIndex);
-    } else if (escaped.startsWith("{d'")) {
-      // date literal, no space
-      return escaped.substring(2, endIndex);
-    } else if (escaped.startsWith("{t'")) {
-      // time literal
-      return escaped.substring(2, endIndex);
-    } else if (escaped.startsWith("{ts'")) {
-      // timestamp literal
-      return escaped.substring(3, endIndex);
-    } else if (escaped.startsWith("{call ") || escaped.startsWith("{CALL ")) {
-      // We support uppercase "{CALL" only because Connector/J supports it. It is not in the JDBC
-      // spec.
-
-      return nativeSql(escaped.substring(1, endIndex), context);
-    } else if (escaped.startsWith("{escape ")) {
-      return escaped.substring(1, endIndex);
-    } else if (escaped.startsWith("{?")) {
-      // likely ?=call(...)
-      return nativeSql(escaped.substring(1, endIndex), context);
-    } else if (escaped.startsWith("{ ") || escaped.startsWith("{\n")) {
-      // Spaces and newlines before keyword, this is not JDBC compliant, however some it works in
-      // some drivers,
-      // so we support it, too
-      for (int i = 2; i < escaped.length(); i++) {
-        if (!Character.isWhitespace(escaped.charAt(i))) {
-          return resolveEscapes("{" + escaped.substring(i), context);
-        }
-      }
-    } else if (escaped.startsWith("{\r\n")) {
-      // Spaces and newlines before keyword, this is not JDBC compliant, however some it works in
-      // some drivers,
-      // so we support it, too
-      for (int i = 3; i < escaped.length(); i++) {
-        if (!Character.isWhitespace(escaped.charAt(i))) {
-          return resolveEscapes("{" + escaped.substring(i), context);
-        }
-      }
-    }
-    throw new SQLException("unknown escape sequence " + escaped);
-  }
-
-  /**
-   * Helper function to replace function parameters in escaped string. 3 functions are handles :
-   *
-   * <ul>
-   *   <li>CONVERT(value, type): replacing SQL_XXX types to convertible type, i.e SQL_BIGINT to
-   *       INTEGER
-   *   <li>TIMESTAMPDIFF(type, ...): replacing type SQL_TSI_XXX in type with XXX, i.e SQL_TSI_HOUR
-   *       with HOUR
-   *   <li>TIMESTAMPADD(type, ...): replacing type SQL_TSI_XXX in type with XXX, i.e SQL_TSI_HOUR
-   *       with HOUR
-   * </ul>
-   *
-   * <p>caution: this use MariaDB server conversion: 'SELECT CONVERT('2147483648', INTEGER)' will
-   * return a BIGINT. MySQL will throw a syntax error.
-   *
-   * @param functionString input string
-   * @return unescaped string
-   */
-  private static String replaceFunctionParameter(String functionString, ConnectionContext context) {
-
-    char[] input = functionString.toCharArray();
-    StringBuilder sb = new StringBuilder();
-    int index;
-    for (index = 0; index < input.length; index++) {
-      if (input[index] != ' ') {
-        break;
-      }
-    }
-
-    for (;
-        index < input.length
-            && ((input[index] >= 'a' && input[index] <= 'z')
-                || (input[index] >= 'A' && input[index] <= 'Z'));
-        index++) {
-      sb.append(input[index]);
-    }
-    String func = sb.toString().toLowerCase(Locale.ROOT);
-    switch (func) {
-      case "convert":
-        // Handle "convert(value, type)" case
-        // extract last parameter, after the last ','
-        int lastCommaIndex = functionString.lastIndexOf(',');
-        int firstParentheses = functionString.indexOf('(');
-        String value = functionString.substring(firstParentheses + 1, lastCommaIndex);
-        for (index = lastCommaIndex + 1; index < input.length; index++) {
-          if (!Character.isWhitespace(input[index])) {
-            break;
-          }
-        }
-
-        int endParam = index + 1;
-        for (; endParam < input.length; endParam++) {
-          if ((input[endParam] < 'a' || input[endParam] > 'z')
-              && (input[endParam] < 'A' || input[endParam] > 'Z')
-              && input[endParam] != '_') {
-            break;
-          }
-        }
-        String typeParam = new String(input, index, endParam - index).toUpperCase(Locale.ROOT);
-        if (typeParam.startsWith("SQL_")) {
-          typeParam = typeParam.substring(4);
-        }
-
-        switch (typeParam) {
-          case "BOOLEAN":
-            return "1=" + value;
-
-          case "BIGINT":
-          case "SMALLINT":
-          case "TINYINT":
-            typeParam = "SIGNED INTEGER";
-            break;
-
-          case "BIT":
-            typeParam = "UNSIGNED INTEGER";
-            break;
-
-          case "BLOB":
-          case "VARBINARY":
-          case "LONGVARBINARY":
-          case "ROWID":
-            typeParam = "BINARY";
-            break;
-
-          case "NCHAR":
-          case "CLOB":
-          case "NCLOB":
-          case "DATALINK":
-          case "VARCHAR":
-          case "NVARCHAR":
-          case "LONGVARCHAR":
-          case "LONGNVARCHAR":
-          case "SQLXML":
-          case "LONGNCHAR":
-            typeParam = "CHAR";
-            break;
-
-          case "DOUBLE":
-          case "FLOAT":
-            if (context.getVersion().isMariaDBServer()
-                || context.getVersion().versionGreaterOrEqual(8, 0, 17)) {
-              typeParam = "DOUBLE";
-              break;
-            }
-            return "0.0+" + value;
-
-          case "REAL":
-          case "NUMERIC":
-            typeParam = "DECIMAL";
-            break;
-
-          case "TIMESTAMP":
-            typeParam = "DATETIME";
-            break;
-
-          default:
-            break;
-        }
-        return new String(input, 0, index)
-            + typeParam
-            + new String(input, endParam, input.length - endParam);
-
-      case "timestampdiff":
-      case "timestampadd":
-        // Skip to first parameter
-        for (; index < input.length; index++) {
-          if (!Character.isWhitespace(input[index]) && input[index] != '(') {
-            break;
-          }
-        }
-        if (index < input.length - 8) {
-          String paramPrefix = new String(input, index, 8);
-          if ("SQL_TSI_".equals(paramPrefix)) {
-            return new String(input, 0, index)
-                + new String(input, index + 8, input.length - (index + 8));
-          }
-        }
-        return functionString;
-
-      default:
-        return functionString;
     }
   }
 
@@ -578,17 +274,32 @@ public class Connection implements java.sql.Connection, PooledConnection {
     //    }
   }
 
+  /**
+   * Cancels the current query - clones the current protocol and executes a query using the new
+   * connection.
+   *
+   * @throws SQLException never thrown
+   */
+  public void cancelCurrentQuery() throws SQLException {
+    try (Connection con = new Connection(conf, hostAddress)) {
+      con.sendQuery(new QueryPacket("KILL QUERY " + context.getThreadId()));
+    }
+  }
+
   private void sendQuery(ClientMessage message) throws SQLException {
-    sendQuery(null, message, 0, 0, ResultSet.CONCUR_READ_ONLY, ResultSet.TYPE_FORWARD_ONLY, false);
+    sendQuery(
+        null, null, message, 0, 0, ResultSet.CONCUR_READ_ONLY, ResultSet.TYPE_FORWARD_ONLY, false);
   }
 
   protected List<Completion> sendQuery(
       Statement stmt,
+      String sql,
       ClientMessage message,
       int maxRows,
       int fetchSize,
       int resultSetConcurrency,
-      int resultSetScrollType, boolean closeOnCompletion)
+      int resultSetScrollType,
+      boolean closeOnCompletion)
       throws SQLException {
     checkNotClosed();
     if (stream != null) stream.fetchRemaining();
@@ -596,24 +307,63 @@ public class Connection implements java.sql.Connection, PooledConnection {
       writer.initPacket();
       message.encode(writer, context);
       writer.flush();
-      return readResults(stmt, maxRows, fetchSize, resultSetConcurrency, resultSetScrollType, closeOnCompletion);
+      return readResults(
+          stmt,
+          sql,
+          maxRows,
+          fetchSize,
+          resultSetConcurrency,
+          resultSetScrollType,
+          closeOnCompletion);
     } catch (IOException ioException) {
       destroySocket();
-      throw exceptionFactory.create(
-          "Socket error during post connection queries: " + ioException.getMessage(),
-          "08000",
-          ioException);
+      throw exceptionFactory
+          .withSql(sql)
+          .create(
+              "Socket error during post connection queries: " + ioException.getMessage(),
+              "08000",
+              ioException);
     }
   }
 
   private List<Completion> readResults(
-      Statement stmt, int maxRows, int fetchSize, int resultSetConcurrency, int resultSetScrollType, boolean closeOnCompletion)
+      Statement stmt,
+      String sql,
+      int maxRows,
+      int fetchSize,
+      int resultSetConcurrency,
+      int resultSetScrollType,
+      boolean closeOnCompletion)
       throws SQLException {
-    List<Completion> completions = new ArrayList<>();
-    readPacket(stmt, completions, maxRows, fetchSize, resultSetConcurrency, resultSetScrollType, closeOnCompletion);
-    while ((context.getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0) {
-      readPacket(stmt, completions, maxRows, fetchSize, resultSetConcurrency, resultSetScrollType, closeOnCompletion);
+
+    Completion completion = readPacket(
+        stmt,
+        sql,
+        maxRows,
+        fetchSize,
+        resultSetConcurrency,
+        resultSetScrollType,
+        closeOnCompletion);
+
+    if ((context.getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) == 0) {
+      if (fetchSize == 0) return Collections.singletonList(completion);
+      List<Completion> completions = new ArrayList<>();
+      completions.add(completion);
+      return completions;
     }
+
+    List<Completion> completions = new ArrayList<>();
+    completions.add(completion);
+    do {
+      readPacket(
+          stmt,
+          sql,
+          maxRows,
+          fetchSize,
+          resultSetConcurrency,
+          resultSetScrollType,
+          closeOnCompletion);
+    } while ((context.getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0);
     return completions;
   }
 
@@ -624,13 +374,14 @@ public class Connection implements java.sql.Connection, PooledConnection {
    * @see <a href="https://mariadb.com/kb/en/mariadb/4-server-response-packets/">server response
    *     packets</a>
    */
-  public void readPacket(
+  public Completion readPacket(
       Statement stmt,
-      List<Completion> completions,
+      String sql,
       int maxRows,
       int fetchSize,
       int resultSetConcurrency,
-      int resultSetScrollType, boolean closeOnCompletion)
+      int resultSetScrollType,
+      boolean closeOnCompletion)
       throws SQLException {
     ReadableByteBuf buf;
     try {
@@ -642,9 +393,8 @@ public class Connection implements java.sql.Connection, PooledConnection {
           // * OK response
           // *********************************************************************************************************
         case 0x00:
-          completions.add(OkPacket.decode(buf, context));
           stream = null;
-          break;
+          return OkPacket.decode(buf, context);
 
           // *********************************************************************************************************
           // * ERROR response
@@ -655,19 +405,21 @@ public class Connection implements java.sql.Connection, PooledConnection {
           // issue a transaction
           ErrorPacket errorPacket = ErrorPacket.decode(buf, context);
           stream = null;
-          throw exceptionFactory.create(
-              errorPacket.getMessage(), errorPacket.getSqlState(), errorPacket.getErrorCode());
+          throw exceptionFactory
+              .withSql(sql)
+              .create(
+                  errorPacket.getMessage(), errorPacket.getSqlState(), errorPacket.getErrorCode());
 
           // *********************************************************************************************************
           // * ResultSet
           // *********************************************************************************************************
         default:
-          int fieldCount = buf.readLength();
+          int fieldCount = buf.readLengthNotNull();
 
           // read columns information's
           ColumnDefinitionPacket[] ci = new ColumnDefinitionPacket[fieldCount];
           for (int i = 0; i < fieldCount; i++) {
-            ci[i] = ColumnDefinitionPacket.decode(reader.readPacket(true), context);
+            ci[i] = ColumnDefinitionPacket.decode(reader.readPacket(false));
           }
 
           if (!context.isEofDeprecated()) {
@@ -683,19 +435,36 @@ public class Connection implements java.sql.Connection, PooledConnection {
 
           Result result;
           if (fetchSize != 0) {
+            context.setServerStatus(context.getServerStatus() ^ ServerStatus.MORE_RESULTS_EXISTS);
             result =
                 new StreamingResult(
-                        stmt, true, ci, reader, context, maxRows, fetchSize, lock, resultSetScrollType,
-                        closeOnCompletion);
+                    stmt,
+                    true,
+                    ci,
+                    reader,
+                    context,
+                    maxRows,
+                    fetchSize,
+                    lock,
+                    resultSetScrollType,
+                    closeOnCompletion);
             if (!result.loaded()) {
               stream = stmt;
             }
           } else {
-            result = new CompleteResult(stmt, true, ci, reader, context, maxRows, resultSetScrollType,
+            result =
+                new CompleteResult(
+                    stmt,
+                    true,
+                    ci,
+                    reader,
+                    context,
+                    maxRows,
+                    resultSetScrollType,
                     closeOnCompletion);
             stream = null;
           }
-          completions.add(result);
+          return result;
       }
     } catch (IOException ioException) {
       destroySocket();
@@ -732,7 +501,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
 
   @Override
   public Statement createStatement() throws SQLException {
-    return new Statement(this, lock);
+    return new Statement(this, lock, canUseServerTimeout);
   }
 
   @Override
@@ -747,7 +516,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
 
   @Override
   public String nativeSQL(String sql) throws SQLException {
-    return nativeSql(sql, context);
+    return NativeSql.parse(sql, context);
   }
 
   @Override
@@ -977,11 +746,38 @@ public class Connection implements java.sql.Connection, PooledConnection {
 
   @Override
   public SQLWarning getWarnings() throws SQLException {
-    return null;
+    checkNotClosed();
+    if (context.getWarning() == 0) {
+      return null;
+    }
+
+    SQLWarning last = null;
+    SQLWarning first = null;
+
+    try (java.sql.Statement st = this.createStatement()) {
+      try (ResultSet rs = st.executeQuery("show warnings")) {
+        // returned result set has 'level', 'code' and 'message' columns, in this order.
+        while (rs.next()) {
+          int code = rs.getInt(2);
+          String message = rs.getString(3);
+          SQLWarning warning = new SQLWarning(message, null, code);
+          if (first == null) {
+            first = warning;
+            last = warning;
+          } else {
+            last.setNextWarning(warning);
+            last = warning;
+          }
+        }
+      }
+    }
+    return first;
   }
 
   @Override
-  public void clearWarnings() throws SQLException {}
+  public void clearWarnings() throws SQLException {
+    context.setWarning(0);
+  }
 
   @Override
   public Statement createStatement(int resultSetType, int resultSetConcurrency)

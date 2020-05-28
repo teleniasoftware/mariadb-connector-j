@@ -275,8 +275,8 @@ public class ConnectionHelper {
           // see https://mariadb.com/kb/en/library/ok_packet/
           // *************************************************************************************
           buf.skip(); // 0x00 OkPacket Header
-          buf.skip(buf.readLength()); // affectedRows
-          buf.skip(buf.readLength());
+          buf.skip(buf.readLengthNotNull()); // affectedRows
+          buf.skip(buf.readLengthNotNull());
           ; // insertId
           context.setServerStatus(buf.readShort());
           break authentication_loop;

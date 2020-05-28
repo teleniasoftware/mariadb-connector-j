@@ -25,10 +25,12 @@ import java.time.Instant;
 import java.util.Properties;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
+import org.junit.jupiter.api.function.Executable;
 
 public class Common {
 
@@ -69,6 +71,11 @@ public class Common {
   @AfterAll
   public static void afterEAll() throws SQLException {
     sharedConn.close();
+  }
+
+  public void assertThrows(Class expectedType, Executable executable, String expected) {
+    Throwable e = Assertions.assertThrows(expectedType, executable);
+    Assertions.assertTrue(e.getMessage().contains(expected));
   }
 
   //  @RegisterExtension public Extension watcher = new Follow();

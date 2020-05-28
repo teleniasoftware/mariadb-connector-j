@@ -33,48 +33,7 @@ import org.mariadb.jdbc.util.constants.ColumnFlags;
 
 public final class ColumnDefinitionPacket implements ServerMessage {
 
-  // This array stored character length for every collation id up to collation id 256
-  // It is generated from the information schema using
-  // "select  id, maxlen from information_schema.character_sets, information_schema.collations
-  // where character_sets.character_set_name = collations.character_set_name order by id"
-  private static final int[] maxCharlen = {
-    0, 2, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 3, 2, 1, 1,
-    1, 0, 1, 2, 1, 1, 1, 1,
-    2, 1, 1, 1, 2, 1, 1, 1,
-    1, 3, 1, 2, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 4, 4, 1,
-    1, 1, 1, 1, 1, 1, 4, 4,
-    0, 1, 1, 1, 4, 4, 0, 1,
-    1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 0, 1, 1, 1,
-    1, 1, 1, 3, 2, 2, 2, 2,
-    2, 1, 2, 3, 1, 1, 1, 2,
-    2, 3, 3, 1, 0, 4, 4, 4,
-    4, 4, 4, 4, 4, 4, 4, 4,
-    4, 4, 4, 4, 4, 4, 4, 4,
-    4, 0, 0, 0, 0, 0, 0, 0,
-    2, 2, 2, 2, 2, 2, 2, 2,
-    2, 2, 2, 2, 2, 2, 2, 2,
-    2, 2, 2, 2, 0, 2, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 2,
-    4, 4, 4, 4, 4, 4, 4, 4,
-    4, 4, 4, 4, 4, 4, 4, 4,
-    4, 4, 4, 4, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    3, 3, 3, 3, 3, 3, 3, 3,
-    3, 3, 3, 3, 3, 3, 3, 3,
-    3, 3, 3, 3, 0, 3, 4, 4,
-    0, 0, 0, 0, 0, 0, 0, 3,
-    4, 4, 4, 4, 4, 4, 4, 4,
-    4, 4, 4, 4, 4, 4, 4, 4,
-    4, 4, 4, 4, 0, 4, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0
-  };
-
-  private final byte[] meta;
-  private int[] stringPointer;
-  private int[] stringLength;
+  private final ReadableByteBuf buf;
   private final int charset;
   private final long length;
   private final DataType dataType;
@@ -83,17 +42,13 @@ public final class ColumnDefinitionPacket implements ServerMessage {
   private boolean useAliasAsName;
 
   private ColumnDefinitionPacket(
-      byte[] meta,
-      int[] stringPointer,
-      int[] stringLength,
+          ReadableByteBuf buf,
       int charset,
       long length,
       DataType dataType,
       byte decimals,
       int flags) {
-    this.meta = meta;
-    this.stringPointer = stringPointer;
-    this.stringLength = stringLength;
+    this.buf = buf;
     this.charset = charset;
     this.length = length;
     this.dataType = dataType;
@@ -104,16 +59,12 @@ public final class ColumnDefinitionPacket implements ServerMessage {
   public static ColumnDefinitionPacket create(String name, DataType type) {
     byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
     byte[] arr = new byte[6 + 2 * nameBytes.length];
-    int[] stringPointer = new int[6];
-    int[] stringLength = new int[6];
 
     // lenenc_str     catalog
     // lenenc_str     schema
     // lenenc_str     table
     // lenenc_str     org_table
     for (int i = 0; i < 4; i++) {
-      stringLength[i] = 0;
-      stringPointer[i] = i;
       arr[i] = 0;
     }
 
@@ -124,8 +75,6 @@ public final class ColumnDefinitionPacket implements ServerMessage {
     for (int i = 0; i < 2; i++) {
       arr[pos++] = (byte) nameBytes.length;
       System.arraycopy(nameBytes, 0, arr, pos, nameBytes.length);
-      stringLength[4 + i] = (byte) nameBytes.length;
-      stringPointer[4 + i] = pos;
       pos += nameBytes.length;
     }
 
@@ -148,49 +97,46 @@ public final class ColumnDefinitionPacket implements ServerMessage {
         break;
     }
 
-    return new ColumnDefinitionPacket(
-        arr, stringPointer, stringLength, 33, len, type, (byte) 0, ColumnFlags.PRIMARY_KEY);
+    return new ColumnDefinitionPacket(new ReadableByteBuf(null, arr, arr.length),
+         33, len, type, (byte) 0, ColumnFlags.PRIMARY_KEY);
   }
 
-  public static ColumnDefinitionPacket decode(ReadableByteBuf buf, ConnectionContext context) {
-    int[] stringPointer = new int[6];
-    int[] stringLength = new int[6];
-    for (int i = 0; i < 6; i++) {
-      stringLength[i] = buf.readLength();
-      stringPointer[i] = buf.pos();
-      buf.skip(stringLength[i]);
-    }
-    byte[] meta = new byte[buf.readableBytes() - 12];
-    buf.readBytes(meta);
+  public static ColumnDefinitionPacket decode(ReadableByteBuf buf) {
+    buf.pos(buf.readableBytes() - 12);
     int charset = buf.readUnsignedShort();
     long length = buf.readUnsignedInt();
     DataType dataType = DataType.fromServer(buf.readUnsignedByte(), charset);
     int flags = buf.readUnsignedShort();
     byte decimals = buf.readByte();
-    return new ColumnDefinitionPacket(
-        meta, stringPointer, stringLength, charset, length, dataType, decimals, flags);
+    return new ColumnDefinitionPacket(buf, charset, length, dataType, decimals, flags);
+  }
+
+  private String getString(int idx) {
+    buf.pos(4);
+    for (int i = 0; i < idx - 1; i++) {
+      buf.skip(buf.readLengthNotNull());
+    }
+    return buf.readString(buf.readLengthNotNull());
   }
 
   public String getSchema() {
-    return new String(meta, stringPointer[1], stringLength[1], StandardCharsets.UTF_8);
+    return getString(0);
   }
 
   public String getTableAlias() {
-    return new String(meta, stringPointer[2], stringLength[2], StandardCharsets.UTF_8);
+    return getString(1);
   }
 
   public String getTable() {
-    int index = useAliasAsName ? 2 : 3;
-    return new String(meta, stringPointer[index], stringLength[index], StandardCharsets.UTF_8);
+    return getString(useAliasAsName ? 1 : 2);
   }
 
   public String getColumnAlias() {
-    return new String(meta, stringPointer[4], stringLength[4], StandardCharsets.UTF_8);
+    return getString(3);
   }
 
   public String getColumn() {
-    int index = useAliasAsName ? 4 : 5;
-    return new String(meta, stringPointer[index], stringLength[index], StandardCharsets.UTF_8);
+    return getString(4);
   }
 
   public int getCharset() {
@@ -212,6 +158,45 @@ public final class ColumnDefinitionPacket implements ServerMessage {
   public boolean isSigned() {
     return ((flags & ColumnFlags.UNSIGNED) == 0);
   }
+
+  // This array stored character length for every collation id up to collation id 256
+  // It is generated from the information schema using
+  // "select  id, maxlen from information_schema.character_sets, information_schema.collations
+  // where character_sets.character_set_name = collations.character_set_name order by id"
+  private static final int[] maxCharlen = {
+          0, 2, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 3, 2, 1, 1,
+          1, 0, 1, 2, 1, 1, 1, 1,
+          2, 1, 1, 1, 2, 1, 1, 1,
+          1, 3, 1, 2, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 4, 4, 1,
+          1, 1, 1, 1, 1, 1, 4, 4,
+          0, 1, 1, 1, 4, 4, 0, 1,
+          1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 0, 1, 1, 1,
+          1, 1, 1, 3, 2, 2, 2, 2,
+          2, 1, 2, 3, 1, 1, 1, 2,
+          2, 3, 3, 1, 0, 4, 4, 4,
+          4, 4, 4, 4, 4, 4, 4, 4,
+          4, 4, 4, 4, 4, 4, 4, 4,
+          4, 0, 0, 0, 0, 0, 0, 0,
+          2, 2, 2, 2, 2, 2, 2, 2,
+          2, 2, 2, 2, 2, 2, 2, 2,
+          2, 2, 2, 2, 0, 2, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 2,
+          4, 4, 4, 4, 4, 4, 4, 4,
+          4, 4, 4, 4, 4, 4, 4, 4,
+          4, 4, 4, 4, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0,
+          3, 3, 3, 3, 3, 3, 3, 3,
+          3, 3, 3, 3, 3, 3, 3, 3,
+          3, 3, 3, 3, 0, 3, 4, 4,
+          0, 0, 0, 0, 0, 0, 0, 3,
+          4, 4, 4, 4, 4, 4, 4, 4,
+          4, 4, 4, 4, 4, 4, 4, 4,
+          4, 4, 4, 4, 0, 4, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0
+  };
 
   public int getDisplaySize() {
     if (dataType == DataType.VARCHAR

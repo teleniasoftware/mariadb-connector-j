@@ -1,9 +1,11 @@
 package org.mariadb.jdbc.integration;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.*;
 import org.mariadb.jdbc.Common;
+import org.mariadb.jdbc.Connection;
 import org.mariadb.jdbc.Statement;
 
 public class StatementTest extends Common {
@@ -48,12 +50,10 @@ public class StatementTest extends Common {
   public void executeGenerated() throws SQLException {
     Statement stmt = sharedConn.createStatement();
     Assertions.assertFalse(stmt.execute("INSERT INTO StatementTest(t2) values (100)"));
-    try {
-      stmt.getGeneratedKeys();
-      Assertions.fail();
-    } catch (SQLException sqle) {
-      Assertions.assertTrue(sqle.getMessage().contains("Cannot return generated keys"));
-    }
+
+    SQLException e = Assertions.assertThrows(SQLException.class, () -> stmt.getGeneratedKeys());
+    Assertions.assertTrue(e.getMessage().contains("Cannot return generated keys"));
+
     Assertions.assertFalse(
         stmt.execute(
             "INSERT INTO StatementTest(t2) values (100)", Statement.RETURN_GENERATED_KEYS));
@@ -104,62 +104,58 @@ public class StatementTest extends Common {
       objs[i] = rs.getObject(i + 1);
     }
 
-    stmt.executeQuery("SELECT * FROM seq_1_to_10000");
+    rs = stmt.executeQuery("SELECT * FROM seq_1_to_10000");
+    Assertions.assertFalse(rs.isClosed());
     stmt.close();
     Assertions.assertTrue(stmt.isClosed());
-    try {
-      stmt.getMoreResults();
-      Assertions.fail();
-    } catch (SQLException sqle) {
-      Assertions.assertTrue(
-          sqle.getMessage().contains("Cannot do an operation on a closed statement"));
-    }
-    try {
-      stmt.execute("ANY");
-      Assertions.fail();
-    } catch (SQLException sqle) {
-      Assertions.assertTrue(
-          sqle.getMessage().contains("Cannot do an operation on a closed statement"));
-    }
-    try {
-      stmt.executeUpdate("ANY");
-      Assertions.fail();
-    } catch (SQLException sqle) {
-      Assertions.assertTrue(
-          sqle.getMessage().contains("Cannot do an operation on a closed statement"));
-    }
-    try {
-      stmt.getMoreResults(1);
-      Assertions.fail();
-    } catch (SQLException sqle) {
-      Assertions.assertTrue(
-          sqle.getMessage().contains("Cannot do an operation on a closed statement"));
-    }
-    try {
-      stmt.executeQuery("ANY");
-      Assertions.fail();
-    } catch (SQLException sqle) {
-      Assertions.assertTrue(
-          sqle.getMessage().contains("Cannot do an operation on a closed statement"));
-    }
-    try {
-      stmt.executeBatch();
-      Assertions.fail();
-    } catch (SQLException sqle) {
-      Assertions.assertTrue(
-          sqle.getMessage().contains("Cannot do an operation on a closed statement"));
-    }
-    try {
-      stmt.getConnection();
-      Assertions.fail();
-    } catch (SQLException sqle) {
-      Assertions.assertTrue(
-          sqle.getMessage().contains("Cannot do an operation on a closed statement"));
-    }
-    stmt.close();
+    Assertions.assertTrue(rs.isClosed());
+    assertThrows(
+        SQLException.class,
+        () -> stmt.getFetchSize(),
+        "Cannot do an operation on a closed statement");
+    assertThrows(
+        SQLException.class,
+        () -> stmt.getMoreResults(),
+        "Cannot do an operation on a closed statement");
+    assertThrows(
+        SQLException.class,
+        () -> stmt.execute("ANY"),
+        "Cannot do an operation on a closed statement");
+    assertThrows(
+        SQLException.class,
+        () -> stmt.executeUpdate("ANY"),
+        "Cannot do an operation on a closed statement");
+    assertThrows(
+        SQLException.class,
+        () -> stmt.executeQuery("ANY"),
+        "Cannot do an operation on a closed statement");
+    assertThrows(
+        SQLException.class,
+        () -> stmt.executeBatch(),
+        "Cannot do an operation on a closed statement");
+    assertThrows(
+        SQLException.class,
+        () -> stmt.getConnection(),
+        "Cannot do an operation on a closed statement");
+    assertThrows(
+        SQLException.class,
+        () -> stmt.getMoreResults(1),
+        "Cannot do an operation on a closed statement");
+    assertThrows(
+        SQLException.class, () -> stmt.cancel(), "Cannot do an operation on a closed statement");
+    assertThrows(
+        SQLException.class,
+        () -> stmt.getMaxRows(),
+        "Cannot do an operation on a closed statement");
+    assertThrows(
+        SQLException.class,
+        () -> stmt.setMaxRows(1),
+        "Cannot do an operation on a closed statement");
+    assertThrows(
+        SQLException.class,
+        () -> stmt.setEscapeProcessing(true),
+        "Cannot do an operation on a closed " + "statement");
   }
-
-
 
   @Test
   public void maxRows() throws SQLException {
@@ -192,13 +188,14 @@ public class StatementTest extends Common {
     Assertions.assertFalse(stmt.isPoolable());
     Assertions.assertFalse(stmt.isWrapperFor(String.class));
     Assertions.assertTrue(stmt.isWrapperFor(Statement.class));
-    java.sql.Statement s = stmt.unwrap(java.sql.Statement.class);
-    try {
-      stmt.unwrap(String.class);
-      Assertions.fail();
-    } catch (SQLException e) {
-      Assertions.assertTrue(e.getMessage().contains("he receiver is not a wrapper and does not implement the interface"));
-    }
+    stmt.unwrap(java.sql.Statement.class);
+
+    assertThrows(
+        SQLException.class,
+        () -> stmt.unwrap(String.class),
+        "he receiver is not a wrapper and does not implement the interface");
+    assertThrows(SQLException.class, () -> stmt.setCursorName(""), "Cursors are not supported");
+
     Assertions.assertEquals(ResultSet.FETCH_FORWARD, stmt.getFetchDirection());
     stmt.setFetchDirection(ResultSet.FETCH_REVERSE);
     Assertions.assertEquals(ResultSet.FETCH_FORWARD, stmt.getFetchDirection());
@@ -218,7 +215,6 @@ public class StatementTest extends Common {
     Assertions.assertTrue(stmt.isClosed());
   }
 
-
   @Test
   public void getMoreResults() throws SQLException {
     Statement stmt = sharedConn.createStatement();
@@ -230,6 +226,190 @@ public class StatementTest extends Common {
     stmt.getMoreResults(Statement.CLOSE_CURRENT_RESULT);
     Assertions.assertTrue(rs.isClosed());
     stmt.close();
+  }
+
+  @Test
+  @Timeout(20)
+  public void queryTimeout() throws Exception {
+    Assumptions.assumeTrue(isMariaDBServer());
+    Statement stmt = sharedConn.createStatement();
+
+    assertThrows(
+        SQLException.class, () -> stmt.setQueryTimeout(-1), "Query timeout cannot be negative");
+
+    assertThrows(
+        SQLTimeoutException.class,
+        () -> {
+          stmt.setQueryTimeout(1);
+          stmt.execute(
+              "select * from information_schema.columns as c1,  information_schema.tables, information_schema"
+                  + ".tables as t2");
+        },
+        "Query execution was interrupted (max_statement_time exceeded)");
+  }
+
+  @Test
+  public void escaping() throws Exception {
+    try (Connection con =
+        (Connection) DriverManager.getConnection(mDefUrl + "&dumpQueriesOnException=true")) {
+      Statement stmt = con.createStatement();
+      assertThrows(
+          SQLException.class,
+          () ->
+              stmt.executeQuery(
+                  "select {fn timestampdiff(SQL_TSI_HOUR, '2003-02-01','2003-05-01')} df df "),
+          "select {fn timestampdiff" + "(SQL_TSI_HOUR, '2003-02-01','2003-05-01')} df df ");
+      stmt.setEscapeProcessing(true);
+      assertThrows(
+          SQLException.class,
+          () ->
+              stmt.executeQuery(
+                  "select {fn timestampdiff(SQL_TSI_HOUR, '2003-02-01','2003-05-01')} df df "),
+          "select timestampdiff(HOUR, '2003-02-01','2003-05-01') df df ");
+    }
+  }
+
+  @Test
+  public void testWarnings() throws SQLException {
+    Assumptions.assumeTrue(isMariaDBServer());
+    Statement stmt = sharedConn.createStatement();
+    stmt.executeQuery("select now() = 1");
+    SQLWarning warning = stmt.getWarnings();
+    Assertions.assertTrue(warning.getMessage().contains("ncorrect datetime value: '1'"));
+    stmt.clearWarnings();
+    Assertions.assertNull(stmt.getWarnings());
+  }
+
+  @Test
+  public void cancel() throws Exception {
+    Assumptions.assumeTrue(isMariaDBServer());
+    Statement stmt = sharedConn.createStatement();
+    stmt.cancel(); // will do nothing
+
+    ExecutorService exec = Executors.newFixedThreadPool(1);
+
+    assertThrows(
+        SQLTimeoutException.class,
+        () -> {
+          exec.execute(new CancelThread(stmt));
+          stmt.execute(
+              "select * from information_schema.columns as c1,  information_schema.tables, information_schema"
+                  + ".tables as t2");
+          exec.shutdown();
+        },
+        "Query execution was interrupted");
+  }
+
+  private static class CancelThread implements Runnable {
+
+    private final java.sql.Statement stmt;
+
+    public CancelThread(java.sql.Statement stmt) {
+      this.stmt = stmt;
+    }
+
+    @Override
+    public void run() {
+      try {
+        Thread.sleep(100);
+        stmt.cancel();
+      } catch (SQLException | InterruptedException e) {
+        e.printStackTrace();
+      }
+    }
+  }
+
+  @Test
+  public void fetch() throws SQLException {
+    Statement stmt = sharedConn.createStatement();
+    stmt.setFetchSize(10);
+    Assertions.assertEquals(10, stmt.getFetchSize());
+    ResultSet rs = stmt.executeQuery("select * FROM seq_1_to_10000");
+
+    for (int i = 1; i <= 10000; i++) {
+      Assertions.assertTrue(rs.next());
+      Assertions.assertEquals(i, rs.getInt(1));
+    }
+
+    Assertions.assertFalse(rs.next());
+  }
+
+  @Test
+  public void fetchUnFinishedSameStatement() throws SQLException {
+    Statement stmt = sharedConn.createStatement();
+    stmt.setFetchSize(10);
+    Assertions.assertEquals(10, stmt.getFetchSize());
+    ResultSet rs = stmt.executeQuery("select * FROM seq_1_to_1000");
+
+    for (int i = 1; i <= 500; i++) {
+      Assertions.assertTrue(rs.next());
+      Assertions.assertEquals(i, rs.getInt(1));
+    }
+
+    ResultSet rs2 = stmt.executeQuery("select * FROM seq_1_to_1000");
+
+    for (int i = 501; i <= 1000; i++) {
+      Assertions.assertTrue(rs.next());
+      Assertions.assertEquals(i, rs.getInt(1));
+    }
+    Assertions.assertFalse(rs.next());
+
+    for (int i = 1; i <= 1000; i++) {
+      Assertions.assertTrue(rs2.next());
+      Assertions.assertEquals(i, rs2.getInt(1));
+    }
+    Assertions.assertFalse(rs2.next());
+  }
+
+  @Test
+  public void fetchUnFinishedOtherStatement() throws SQLException {
+    Statement stmt = sharedConn.createStatement();
+    stmt.setFetchSize(10);
+    Assertions.assertEquals(10, stmt.getFetchSize());
+    ResultSet rs = stmt.executeQuery("select * FROM seq_1_to_1000");
+
+    for (int i = 1; i <= 500; i++) {
+      Assertions.assertTrue(rs.next());
+      Assertions.assertEquals(i, rs.getInt(1));
+    }
+
+    Statement stmt2 = sharedConn.createStatement();
+    ResultSet rs2 = stmt2.executeQuery("select * FROM seq_1_to_1000");
+
+    for (int i = 501; i <= 1000; i++) {
+      Assertions.assertTrue(rs.next());
+      Assertions.assertEquals(i, rs.getInt(1));
+    }
+    Assertions.assertFalse(rs.next());
+
+    for (int i = 1; i <= 1000; i++) {
+      Assertions.assertTrue(rs2.next());
+      Assertions.assertEquals(i, rs2.getInt(1));
+    }
+    Assertions.assertFalse(rs2.next());
+  }
+
+  @Test
+  public void fetchClose() throws SQLException {
+    Statement stmt = sharedConn.createStatement();
+    stmt.setFetchSize(10);
+    Assertions.assertEquals(10, stmt.getFetchSize());
+    ResultSet rs = stmt.executeQuery("select * FROM seq_1_to_1000");
+
+    for (int i = 1; i <= 500; i++) {
+      Assertions.assertTrue(rs.next());
+      Assertions.assertEquals(i, rs.getInt(1));
+    }
+    stmt.close();
+    Assertions.assertTrue(rs.isClosed());
+
+    Statement stmt2 = sharedConn.createStatement();
+    ResultSet rs2 = stmt2.executeQuery("select * FROM seq_1_to_1000");
+    for (int i = 1; i <= 1000; i++) {
+      Assertions.assertTrue(rs2.next());
+      Assertions.assertEquals(i, rs2.getInt(1));
+    }
+    Assertions.assertFalse(rs2.next());
   }
 
 }

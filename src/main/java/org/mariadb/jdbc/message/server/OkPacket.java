@@ -49,28 +49,30 @@ public class OkPacket implements ServerMessage, Completion {
 
   public static OkPacket decode(ReadableByteBuf buf, ConnectionContext context) {
     buf.skip();
-    long affectedRows = buf.readLength();
-    long lastInsertId = buf.readLength();
+    long affectedRows = buf.readLengthNotNull();
+    long lastInsertId = buf.readLengthNotNull();
     int serverStatus = buf.readUnsignedShort();
     int warningCount = buf.readUnsignedShort();
 
     if ((context.getServerCapabilities() & Capabilities.CLIENT_SESSION_TRACK) != 0
         && buf.readableBytes() > 0) {
-      buf.skip(buf.readLength()); // skip info
+      buf.skip(buf.readLengthNotNull()); // skip info
       while (buf.readableBytes() > 0) {
         ReadableByteBuf stateInfo = buf.readLengthBuffer();
         if (stateInfo.readableBytes() > 0) {
           switch (stateInfo.readByte()) {
             case StateChange.SESSION_TRACK_SYSTEM_VARIABLES:
               ReadableByteBuf sessionVariableBuf = stateInfo.readLengthBuffer();
-              String variable = sessionVariableBuf.readString(sessionVariableBuf.readLength());
-              String value = sessionVariableBuf.readString(sessionVariableBuf.readLength());
+              String variable = sessionVariableBuf.readString(sessionVariableBuf.readLengthNotNull());
+              Integer len = sessionVariableBuf.readLength();
+              String value = len == null ? null : sessionVariableBuf.readString(len);
               logger.debug("System variable change :  {} = {}", variable, value);
               break;
 
             case StateChange.SESSION_TRACK_SCHEMA:
               ReadableByteBuf sessionSchemaBuf = stateInfo.readLengthBuffer();
-              String database = sessionSchemaBuf.readString(sessionSchemaBuf.readLength());
+              Integer dbLen = sessionSchemaBuf.readLength();
+              String database = dbLen == null ? null : sessionSchemaBuf.readString(dbLen);
               context.setDatabase(database);
               logger.debug("Database change : now is '{}'", database);
               break;

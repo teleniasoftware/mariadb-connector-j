@@ -45,13 +45,14 @@ public abstract class Result implements Completion, ResultSet {
   private final boolean closeOnCompletion;
 
   public Result(
-          org.mariadb.jdbc.Statement stmt,
-          boolean text,
-          ColumnDefinitionPacket[] metadataList,
-          PacketReader reader,
-          ConnectionContext context,
-          int maxRows,
-          int resultSetScrollType, boolean closeOnCompletion) {
+      org.mariadb.jdbc.Statement stmt,
+      boolean text,
+      ColumnDefinitionPacket[] metadataList,
+      PacketReader reader,
+      ConnectionContext context,
+      int maxRows,
+      int resultSetScrollType,
+      boolean closeOnCompletion) {
     this.statement = stmt;
     this.closeOnCompletion = closeOnCompletion;
     this.text = text;
@@ -86,7 +87,7 @@ public abstract class Result implements Completion, ResultSet {
   protected boolean readNext() throws SQLException, IOException {
     ReadableByteBuf buf = reader.readPacket(false);
     switch (buf.getUnsignedByte()) {
-      case 0x00:
+      case 0xFF:
         loaded = true;
         ErrorPacket errorPacket = ErrorPacket.decode(buf, context);
         throw exceptionFactory.create(
@@ -106,8 +107,8 @@ public abstract class Result implements Completion, ResultSet {
             serverStatus = buf.readUnsignedShort();
           } else {
             // OK_Packet with a 0xFE header
-            buf.skip(buf.readLength()); // skip update count
-            buf.skip(buf.readLength()); // skip insert id
+            buf.skip(buf.readLengthNotNull()); // skip update count
+            buf.skip(buf.readLengthNotNull()); // skip insert id
             serverStatus = buf.readUnsignedShort();
             warnings = buf.readUnsignedShort();
           }
@@ -154,8 +155,8 @@ public abstract class Result implements Completion, ResultSet {
               serverStatus = buf.readUnsignedShort();
             } else {
               // OK_Packet with a 0xFE header
-              buf.skip(buf.readLength()); // skip update count
-              buf.skip(buf.readLength()); // skip insert id
+              buf.skip(buf.readLengthNotNull()); // skip update count
+              buf.skip(buf.readLengthNotNull()); // skip insert id
               serverStatus = buf.readUnsignedShort();
               warnings = buf.readUnsignedShort();
             }
@@ -402,8 +403,7 @@ public abstract class Result implements Completion, ResultSet {
     if (columnIndex < 1 || columnIndex > maxIndex) {
       throw new SQLException(
           String.format(
-              "Wrong index position. Is %s but must be in 1-%s range",
-              columnIndex, maxIndex));
+              "Wrong index position. Is %s but must be in 1-%s range", columnIndex, maxIndex));
     }
     Codec defaultCodec = metadataList[columnIndex - 1].getDefaultCodec();
     return row.get(columnIndex, defaultCodec);

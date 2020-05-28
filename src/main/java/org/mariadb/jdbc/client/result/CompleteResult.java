@@ -6,7 +6,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
-
 import org.mariadb.jdbc.Statement;
 import org.mariadb.jdbc.client.ConnectionContext;
 import org.mariadb.jdbc.client.PacketReader;
@@ -18,16 +17,18 @@ import org.mariadb.jdbc.util.exceptions.ExceptionFactory;
 public class CompleteResult extends Result {
 
   public CompleteResult(
-          Statement stmt,
-          boolean text,
+      Statement stmt,
+      boolean text,
       ColumnDefinitionPacket[] metadataList,
       PacketReader reader,
       ConnectionContext context,
       int maxRows,
-      int resultSetScrollType, boolean closeOnCompletion)
+      int resultSetScrollType,
+      boolean closeOnCompletion)
       throws IOException, SQLException {
 
-    super(stmt, text, metadataList, reader, context, maxRows, resultSetScrollType, closeOnCompletion);
+    super(
+        stmt, text, metadataList, reader, context, maxRows, resultSetScrollType, closeOnCompletion);
     this.data = new ArrayList<>(10);
     while (readNext()) {}
     loaded = true;

@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.concurrent.locks.ReentrantLock;
-
 import org.mariadb.jdbc.Statement;
 import org.mariadb.jdbc.client.ConnectionContext;
 import org.mariadb.jdbc.client.PacketReader;
@@ -17,7 +16,7 @@ public class StreamingResult extends Result {
   private int fetchSize;
 
   public StreamingResult(
-          Statement stmt,
+      Statement stmt,
       boolean text,
       ColumnDefinitionPacket[] metadataList,
       PacketReader reader,
@@ -25,10 +24,12 @@ public class StreamingResult extends Result {
       int maxRows,
       int fetchSize,
       ReentrantLock lock,
-      int resultSetScrollType, boolean closeOnCompletion)
+      int resultSetScrollType,
+      boolean closeOnCompletion)
       throws IOException, SQLException {
 
-    super(stmt, text, metadataList, reader, context, maxRows, resultSetScrollType, closeOnCompletion);
+    super(
+        stmt, text, metadataList, reader, context, maxRows, resultSetScrollType, closeOnCompletion);
     this.lock = lock;
     this.dataFetchTime = 0;
     this.fetchSize = fetchSize;
@@ -40,6 +41,22 @@ public class StreamingResult extends Result {
   @Override
   public boolean streaming() {
     return true;
+  }
+
+  /**
+   * This permit to replace current stream results by next ones.
+   *
+   * @throws IOException if socket exception occur
+   * @throws SQLException if server return an unexpected error
+   */
+  private void nextStreamingValue() throws IOException, SQLException {
+
+    // if resultSet can be back to some previous value
+    if (resultSetScrollType == TYPE_FORWARD_ONLY) {
+      data.clear();
+    }
+
+    addStreamingValue();
   }
 
   private void addStreamingValue() throws IOException, SQLException {
@@ -96,7 +113,7 @@ public class StreamingResult extends Result {
         lock.lock();
         try {
           if (!loaded) {
-            addStreamingValue();
+            nextStreamingValue();
           }
         } catch (IOException ioe) {
           throw exceptionFactory.create("Error while streaming resultset data", "08000", ioe);

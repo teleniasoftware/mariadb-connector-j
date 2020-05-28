@@ -122,8 +122,20 @@ public class ReadableByteBuf {
     return this;
   }
 
-  public String getString(int index, int length) {
-    return new String(buf, index, length, StandardCharsets.UTF_8);
+  public int readLengthNotNull() {
+    int type = (buf[pos++] & 0xff);
+    switch (type) {
+      case 251:
+        throw new IllegalStateException("Must not have null length");
+      case 252:
+        return readUnsignedShort();
+      case 253:
+        return readUnsignedMedium();
+      case 254:
+        return (int) readLong();
+      default:
+        return type;
+    }
   }
 
   public Integer readLength() {
@@ -155,7 +167,7 @@ public class ReadableByteBuf {
   }
 
   public int readUnsignedShort() {
-    return readShort() & 0xffff;
+    return ((buf[pos++] & 0xff) | (buf[pos++] << 8)) & 0xffff;
   }
 
   public int readMedium() {
@@ -178,7 +190,11 @@ public class ReadableByteBuf {
   }
 
   public long readUnsignedInt() {
-    return readInt() & 0xffffffff;
+    return ((buf[pos++] & 0xff)
+            + ((buf[pos++] & 0xff) << 8)
+            + ((buf[pos++] & 0xff) << 16)
+            + ((buf[pos++] & 0xff) << 24))
+        & 0xffffffff;
   }
 
   public long readLong() {
@@ -210,7 +226,7 @@ public class ReadableByteBuf {
   }
 
   public ReadableByteBuf readLengthBuffer() {
-    int len = readLength();
+    int len = readLengthNotNull();
     byte[] tmp = new byte[len];
     readBytes(tmp);
     return new ReadableByteBuf(sequence, tmp, len);

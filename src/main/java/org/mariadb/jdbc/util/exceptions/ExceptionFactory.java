@@ -7,7 +7,7 @@ import org.mariadb.jdbc.Connection;
 import org.mariadb.jdbc.HostAddress;
 import org.mariadb.jdbc.util.options.Options;
 
-public final class ExceptionFactory {
+public class ExceptionFactory {
 
   private final Connection connection;
   private final Options options;
@@ -44,10 +44,15 @@ public final class ExceptionFactory {
         this.connection, this.options, this.hostAddress, this.threadId, statement);
   }
 
+  public ExceptionFactory withSql(String sql) {
+    return new SqlExceptionFactory(
+        this.connection, this.options, this.hostAddress, this.threadId, statement, sql);
+  }
+
   private SQLException createException(
       String initialMessage, String sqlState, int errorCode, Exception cause) {
 
-    String msg = buildMsgText(initialMessage, threadId, options, cause);
+    String msg = buildMsgText(initialMessage, threadId, options, cause, getSql());
 
     if ("70100".equals(sqlState)) { // ER_QUERY_INTERRUPTED
       return new SQLTimeoutException(msg, sqlState, errorCode);
@@ -102,7 +107,7 @@ public final class ExceptionFactory {
   }
 
   private static String buildMsgText(
-      String initialMessage, long threadId, Options options, Exception cause) {
+      String initialMessage, long threadId, Options options, Exception cause, String sql) {
 
     StringBuilder msg = new StringBuilder();
     String deadLockException = null;
@@ -114,21 +119,32 @@ public final class ExceptionFactory {
       msg.append(initialMessage);
     }
 
-    if (cause instanceof MariaDbSqlException) {
-      MariaDbSqlException exception = ((MariaDbSqlException) cause);
-      String sql = exception.getSql();
-      if (options.dumpQueriesOnException && sql != null) {
-        if (options != null
-            && options.maxQuerySizeToLog != 0
-            && sql.length() > options.maxQuerySizeToLog - 3) {
-          msg.append("\nQuery is: ").append(sql, 0, options.maxQuerySizeToLog - 3).append("...");
-        } else {
-          msg.append("\nQuery is: ").append(sql);
-        }
+    if (options.dumpQueriesOnException && sql != null) {
+      if (options != null
+          && options.maxQuerySizeToLog != 0
+          && sql.length() > options.maxQuerySizeToLog - 3) {
+        msg.append("\nQuery is: ").append(sql, 0, options.maxQuerySizeToLog - 3).append("...");
+      } else {
+        msg.append("\nQuery is: ").append(sql);
       }
-      deadLockException = exception.getDeadLockInfo();
-      threadName = exception.getThreadName();
     }
+
+    //    if (cause instanceof MariaDbSqlException) {
+    //      MariaDbSqlException exception = ((MariaDbSqlException) cause);
+    //      String sql = exception.getSql();
+    //      if (options.dumpQueriesOnException && sql != null) {
+    //        if (options != null
+    //            && options.maxQuerySizeToLog != 0
+    //            && sql.length() > options.maxQuerySizeToLog - 3) {
+    //          msg.append("\nQuery is: ").append(sql, 0, options.maxQuerySizeToLog -
+    // 3).append("...");
+    //        } else {
+    //          msg.append("\nQuery is: ").append(sql);
+    //        }
+    //      }
+    //      deadLockException = exception.getDeadLockInfo();
+    //      threadName = exception.getThreadName();
+    //    }
 
     if (options != null
         && options.includeInnodbStatusInDeadlockExceptions
@@ -194,8 +210,31 @@ public final class ExceptionFactory {
     return createException(message, sqlState, errorCode, null);
   }
 
+  public String getSql() {
+    return null;
+  }
+
   @Override
   public String toString() {
     return "ExceptionFactory{threadId=" + threadId + '}';
+  }
+
+  public class SqlExceptionFactory extends ExceptionFactory {
+    private String sql;
+
+    public SqlExceptionFactory(
+        Connection connection,
+        Options options,
+        HostAddress hostAddress,
+        long threadId,
+        Statement statement,
+        String sql) {
+      super(connection, options, hostAddress, threadId, statement);
+      this.sql = sql;
+    }
+
+    public String getSql() {
+      return sql;
+    }
   }
 }
