@@ -23,12 +23,12 @@ public class CompleteResult extends Result {
       PacketReader reader,
       ConnectionContext context,
       int maxRows,
-      int resultSetScrollType,
+      int resultSetType,
       boolean closeOnCompletion)
       throws IOException, SQLException {
 
     super(
-        stmt, text, metadataList, reader, context, maxRows, resultSetScrollType, closeOnCompletion);
+        stmt, text, metadataList, reader, context, maxRows, resultSetType, closeOnCompletion);
     this.data = new ArrayList<>(10);
     while (readNext()) {}
     loaded = true;

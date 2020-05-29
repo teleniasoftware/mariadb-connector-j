@@ -24,12 +24,12 @@ public class StreamingResult extends Result {
       int maxRows,
       int fetchSize,
       ReentrantLock lock,
-      int resultSetScrollType,
+      int resultSetType,
       boolean closeOnCompletion)
       throws IOException, SQLException {
 
     super(
-        stmt, text, metadataList, reader, context, maxRows, resultSetScrollType, closeOnCompletion);
+        stmt, text, metadataList, reader, context, maxRows, resultSetType, closeOnCompletion);
     this.lock = lock;
     this.dataFetchTime = 0;
     this.fetchSize = fetchSize;
@@ -52,7 +52,7 @@ public class StreamingResult extends Result {
   private void nextStreamingValue() throws IOException, SQLException {
 
     // if resultSet can be back to some previous value
-    if (resultSetScrollType == TYPE_FORWARD_ONLY) {
+    if (resultSetType == TYPE_FORWARD_ONLY) {
       data.clear();
     }
 
@@ -121,7 +121,7 @@ public class StreamingResult extends Result {
           lock.unlock();
         }
 
-        if (resultSetScrollType == TYPE_FORWARD_ONLY) {
+        if (resultSetType == TYPE_FORWARD_ONLY) {
           // resultSet has been cleared. next value is pointer 0.
           rowPointer = 0;
           if (data.size() > 0) {
@@ -224,7 +224,7 @@ public class StreamingResult extends Result {
   @Override
   public void beforeFirst() throws SQLException {
     checkClose();
-    if (resultSetScrollType == TYPE_FORWARD_ONLY) {
+    if (resultSetType == TYPE_FORWARD_ONLY) {
       throw exceptionFactory.create("Invalid operation for result set type TYPE_FORWARD_ONLY");
     }
     row.setRow(null);
@@ -243,7 +243,7 @@ public class StreamingResult extends Result {
   public boolean first() throws SQLException {
     checkClose();
 
-    if (resultSetScrollType == TYPE_FORWARD_ONLY) {
+    if (resultSetType == TYPE_FORWARD_ONLY) {
       throw exceptionFactory.create("Invalid operation for result set type TYPE_FORWARD_ONLY");
     }
 
@@ -272,7 +272,7 @@ public class StreamingResult extends Result {
   @Override
   public int getRow() throws SQLException {
     checkClose();
-    if (resultSetScrollType == TYPE_FORWARD_ONLY) {
+    if (resultSetType == TYPE_FORWARD_ONLY) {
       return 0;
     }
     return rowPointer + 1;
@@ -282,7 +282,7 @@ public class StreamingResult extends Result {
   public boolean absolute(int idx) throws SQLException {
     checkClose();
 
-    if (resultSetScrollType == TYPE_FORWARD_ONLY) {
+    if (resultSetType == TYPE_FORWARD_ONLY) {
       throw exceptionFactory.create("Invalid operation for result set type TYPE_FORWARD_ONLY");
     }
 
@@ -324,7 +324,7 @@ public class StreamingResult extends Result {
   @Override
   public boolean relative(int rows) throws SQLException {
     checkClose();
-    if (resultSetScrollType == TYPE_FORWARD_ONLY) {
+    if (resultSetType == TYPE_FORWARD_ONLY) {
       throw exceptionFactory.create("Invalid operation for result set type TYPE_FORWARD_ONLY");
     }
     int newPos = rowPointer + rows;
@@ -346,7 +346,7 @@ public class StreamingResult extends Result {
   @Override
   public boolean previous() throws SQLException {
     checkClose();
-    if (resultSetScrollType == TYPE_FORWARD_ONLY) {
+    if (resultSetType == TYPE_FORWARD_ONLY) {
       throw exceptionFactory.create("Invalid operation for result set type TYPE_FORWARD_ONLY");
     }
     if (rowPointer > -1) {

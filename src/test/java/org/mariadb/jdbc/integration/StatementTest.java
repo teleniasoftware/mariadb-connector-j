@@ -95,12 +95,13 @@ public class StatementTest extends Common {
 
   @Test
   public void close() throws SQLException {
+    Assumptions.assumeTrue(isMariaDBServer());
     Statement stmt = sharedConn.createStatement();
     Assertions.assertFalse(stmt.isClosed());
     ResultSet rs = stmt.executeQuery("select * FROM mysql.user LIMIT 1");
     rs.next();
-    Object[] objs = new Object[46];
-    for (int i = 0; i < 46; i++) {
+    Object[] objs = new Object[45];
+    for (int i = 0; i < 45; i++) {
       objs[i] = rs.getObject(i + 1);
     }
 
@@ -159,6 +160,7 @@ public class StatementTest extends Common {
 
   @Test
   public void maxRows() throws SQLException {
+    Assumptions.assumeTrue(isMariaDBServer());
     Statement stmt = sharedConn.createStatement();
     Assertions.assertEquals(0, stmt.getMaxRows());
     try {
@@ -217,6 +219,7 @@ public class StatementTest extends Common {
 
   @Test
   public void getMoreResults() throws SQLException {
+    Assumptions.assumeTrue(isMariaDBServer());
     Statement stmt = sharedConn.createStatement();
     ResultSet rs = stmt.executeQuery("SELECT * FROM seq_1_to_10000");
     Assertions.assertFalse(stmt.getMoreResults(Statement.KEEP_CURRENT_RESULT));
@@ -321,6 +324,7 @@ public class StatementTest extends Common {
 
   @Test
   public void fetch() throws SQLException {
+    Assumptions.assumeTrue(isMariaDBServer());
     Statement stmt = sharedConn.createStatement();
     stmt.setFetchSize(10);
     Assertions.assertEquals(10, stmt.getFetchSize());
@@ -336,6 +340,7 @@ public class StatementTest extends Common {
 
   @Test
   public void fetchUnFinishedSameStatement() throws SQLException {
+    Assumptions.assumeTrue(isMariaDBServer());
     Statement stmt = sharedConn.createStatement();
     stmt.setFetchSize(10);
     Assertions.assertEquals(10, stmt.getFetchSize());
@@ -363,6 +368,7 @@ public class StatementTest extends Common {
 
   @Test
   public void fetchUnFinishedOtherStatement() throws SQLException {
+    Assumptions.assumeTrue(isMariaDBServer());
     Statement stmt = sharedConn.createStatement();
     stmt.setFetchSize(5);
     Assertions.assertEquals(5, stmt.getFetchSize());
@@ -391,6 +397,7 @@ public class StatementTest extends Common {
 
   @Test
   public void fetchClose() throws SQLException {
+    Assumptions.assumeTrue(isMariaDBServer());
     Statement stmt = sharedConn.createStatement();
     stmt.setFetchSize(10);
     Assertions.assertEquals(10, stmt.getFetchSize());

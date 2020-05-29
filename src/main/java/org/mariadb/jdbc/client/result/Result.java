@@ -35,7 +35,7 @@ public abstract class Result implements Completion, ResultSet {
   private int currRows = 0;
   protected RowDecoder row;
 
-  protected final int resultSetScrollType;
+  protected final int resultSetType;
   protected final ExceptionFactory exceptionFactory;
   protected final PacketReader reader;
   protected List<ReadableByteBuf> data;
@@ -51,7 +51,7 @@ public abstract class Result implements Completion, ResultSet {
       PacketReader reader,
       ConnectionContext context,
       int maxRows,
-      int resultSetScrollType,
+      int resultSetType,
       boolean closeOnCompletion) {
     this.statement = stmt;
     this.closeOnCompletion = closeOnCompletion;
@@ -62,7 +62,7 @@ public abstract class Result implements Completion, ResultSet {
     this.exceptionFactory = context.getExceptionFactory();
     this.context = context;
     this.maxRows = maxRows;
-    this.resultSetScrollType = resultSetScrollType;
+    this.resultSetType = resultSetType;
     row = new TextRowDecoder(this.maxIndex, metadataList);
   }
 
@@ -79,7 +79,7 @@ public abstract class Result implements Completion, ResultSet {
     this.data = data;
     this.maxRows = 0;
     this.statement = null;
-    this.resultSetScrollType = TYPE_FORWARD_ONLY;
+    this.resultSetType = TYPE_FORWARD_ONLY;
     this.closeOnCompletion = false;
     row = new TextRowDecoder(maxIndex, metadataList);
   }
@@ -489,7 +489,7 @@ public abstract class Result implements Completion, ResultSet {
 
   @Override
   public int getType() {
-    return resultSetScrollType;
+    return resultSetType;
   }
 
   @Override

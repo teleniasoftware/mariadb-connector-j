@@ -42,7 +42,7 @@ public class ConnectionContext {
     this.serverCapabilities = handshake.getCapabilities();
     this.serverStatus = handshake.getServerStatus();
     this.version = new ServerVersion(handshake.getServerVersion(), handshake.isMariaDBServer());
-    this.eofDeprecated = (serverCapabilities | Capabilities.CLIENT_DEPRECATE_EOF) > 0;
+    this.eofDeprecated = (serverCapabilities & Capabilities.CLIENT_DEPRECATE_EOF) > 0;
     this.conf = conf;
     this.database = conf.getDatabase();
     this.exceptionFactory = exceptionFactory;

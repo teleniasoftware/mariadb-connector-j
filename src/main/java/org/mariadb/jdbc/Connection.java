@@ -3,6 +3,7 @@ package org.mariadb.jdbc;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.Socket;
+import java.net.SocketException;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.Executor;
@@ -49,6 +50,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
   private boolean canUseServerTimeout;
   private int stateFlag = 0;
   private Statement stream = null;
+  private int socketTimeout;
 
   public Connection(Configuration conf, HostAddress hostAddress) throws SQLException {
     this.conf = conf;
@@ -126,6 +128,10 @@ public class Connection implements java.sql.Connection, PooledConnection {
     }
 
     postConnectionQueries();
+
+    if (conf.getOptions().socketTimeout != null) {
+      this.socketTimeout = conf.getOptions().socketTimeout;
+    }
 
     // validate galera state
     if (hostAddress != null
@@ -298,7 +304,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
       int maxRows,
       int fetchSize,
       int resultSetConcurrency,
-      int resultSetScrollType,
+      int resultSetType,
       boolean closeOnCompletion)
       throws SQLException {
     checkNotClosed();
@@ -313,7 +319,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
           maxRows,
           fetchSize,
           resultSetConcurrency,
-          resultSetScrollType,
+          resultSetType,
           closeOnCompletion);
     } catch (IOException ioException) {
       destroySocket();
@@ -332,7 +338,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
       int maxRows,
       int fetchSize,
       int resultSetConcurrency,
-      int resultSetScrollType,
+      int resultSetType,
       boolean closeOnCompletion)
       throws SQLException {
     List<Completion> completions = new ArrayList<>();
@@ -343,7 +349,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
             maxRows,
             fetchSize,
             resultSetConcurrency,
-            resultSetScrollType,
+            resultSetType,
             closeOnCompletion));
 
     while ((context.getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0) {
@@ -354,7 +360,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
               maxRows,
               fetchSize,
               resultSetConcurrency,
-              resultSetScrollType,
+              resultSetType,
               closeOnCompletion));
     }
     return completions;
@@ -373,7 +379,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
       int maxRows,
       int fetchSize,
       int resultSetConcurrency,
-      int resultSetScrollType,
+      int resultSetType,
       boolean closeOnCompletion)
       throws SQLException {
     ReadableByteBuf buf;
@@ -442,7 +448,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
                     maxRows,
                     fetchSize,
                     lock,
-                    resultSetScrollType,
+                    resultSetType,
                     closeOnCompletion);
             if (!result.loaded()) {
               stream = stmt;
@@ -456,7 +462,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
                     reader,
                     context,
                     maxRows,
-                    resultSetScrollType,
+                    resultSetType,
                     closeOnCompletion);
             stream = null;
           }
@@ -496,17 +502,19 @@ public class Connection implements java.sql.Connection, PooledConnection {
   }
 
   @Override
-  public Statement createStatement() throws SQLException {
-    return new Statement(this, lock, canUseServerTimeout);
+  public Statement createStatement() {
+    return new Statement(this, lock, canUseServerTimeout, ResultSet.TYPE_FORWARD_ONLY , ResultSet.CONCUR_READ_ONLY);
   }
 
   @Override
   public PreparedStatement prepareStatement(String sql) throws SQLException {
+    // TODO
     return null;
   }
 
   @Override
   public CallableStatement prepareCall(String sql) throws SQLException {
+    // TODO
     return null;
   }
 
@@ -561,29 +569,26 @@ public class Connection implements java.sql.Connection, PooledConnection {
   @Override
   public void close() throws SQLException {
     fireConnectionClosed(new ConnectionEvent(this));
-    boolean locked = false;
-    if (lock != null) {
-      locked = lock.tryLock();
+    boolean locked = lock.tryLock();
+
+    if (this.close.compareAndSet(false, true)) {
+      try {
+        writer.initPacket();
+        QuitPacket.INSTANCE.encode(writer, context);
+        writer.flush();
+      } catch (SQLException | IOException e) {
+        // eat
+      }
+      closeSocket();
     }
 
-    if (this.close.compareAndSet(false, true)) {}
-
-    try {
-      writer.initPacket();
-      QuitPacket.INSTANCE.encode(writer, context);
-      writer.flush();
-    } catch (SQLException | IOException e) {
-      // eat
-    }
-
-    closeSocket();
     if (locked) {
       lock.unlock();
     }
   }
 
   @Override
-  public boolean isClosed() throws SQLException {
+  public boolean isClosed() {
     return close.get();
   }
 
@@ -614,7 +619,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
   }
 
   @Override
-  public DatabaseMetaData getMetaData() throws SQLException {
+  public DatabaseMetaData getMetaData() {
     return new DatabaseMetaData(this, this.conf);
   }
 
@@ -776,9 +781,8 @@ public class Connection implements java.sql.Connection, PooledConnection {
   }
 
   @Override
-  public Statement createStatement(int resultSetType, int resultSetConcurrency)
-      throws SQLException {
-    return null;
+  public Statement createStatement(int resultSetType, int resultSetConcurrency) {
+    return new Statement(this, lock, canUseServerTimeout, resultSetType, resultSetConcurrency);
   }
 
   @Override
@@ -827,8 +831,8 @@ public class Connection implements java.sql.Connection, PooledConnection {
 
   @Override
   public Statement createStatement(
-      int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException {
-    return null;
+      int resultSetType, int resultSetConcurrency, int resultSetHoldability) {
+    return new Statement(this, lock, canUseServerTimeout, resultSetType, resultSetConcurrency);
   }
 
   @Override
@@ -861,23 +865,23 @@ public class Connection implements java.sql.Connection, PooledConnection {
   }
 
   @Override
-  public Clob createClob() throws SQLException {
-    return null;
+  public Clob createClob() {
+    return new MariaDbClob();
   }
 
   @Override
-  public Blob createBlob() throws SQLException {
-    return null;
+  public Blob createBlob() {
+    return new MariaDbBlob();
   }
 
   @Override
-  public NClob createNClob() throws SQLException {
-    return null;
+  public NClob createNClob() {
+    return new MariaDbClob();
   }
 
   @Override
   public SQLXML createSQLXML() throws SQLException {
-    return null;
+    throw exceptionFactory.notSupported("SQLXML type is not supported");
   }
 
   private void checkNotClosed() throws SQLException {
@@ -903,58 +907,256 @@ public class Connection implements java.sql.Connection, PooledConnection {
   }
 
   @Override
-  public void setClientInfo(String name, String value) throws SQLClientInfoException {}
+  public void setClientInfo(String name, String value) throws SQLClientInfoException {
+    checkClientClose(name);
+    checkClientValidProperty(name);
+
+    try {
+      java.sql.Statement statement = createStatement();
+      statement.execute(buildClientQuery(name, value));
+    } catch (SQLException sqle) {
+      Map<String, ClientInfoStatus> failures = new HashMap<>();
+      failures.put(name, ClientInfoStatus.REASON_UNKNOWN);
+      throw new SQLClientInfoException("unexpected error during setClientInfo", failures, sqle);
+    }
+  }
+
+  private void checkClientClose(final String name) throws SQLClientInfoException {
+    if (close.get()) {
+      Map<String, ClientInfoStatus> failures = new HashMap<>();
+      failures.put(name, ClientInfoStatus.REASON_UNKNOWN);
+      throw new SQLClientInfoException("setClientInfo() is called on closed connection", failures);
+    }
+  }
+
+  private void checkClientValidProperty(final String name) throws SQLClientInfoException {
+    if (name == null
+            || (!"ApplicationName".equals(name)
+            && !"ClientUser".equals(name)
+            && !"ClientHostname".equals(name))) {
+      Map<String, ClientInfoStatus> failures = new HashMap<>();
+      failures.put(name, ClientInfoStatus.REASON_UNKNOWN_PROPERTY);
+      throw new SQLClientInfoException(
+              "setClientInfo() parameters can only be \"ApplicationName\",\"ClientUser\" or \"ClientHostname\", "
+                      + "but was : "
+                      + name,
+              failures);
+    }
+  }
+
+  private String buildClientQuery(final String name, final String value) {
+    StringBuilder escapeQuery = new StringBuilder("SET @").append(name).append("=");
+    if (value == null) {
+      escapeQuery.append("null");
+    } else {
+      escapeQuery.append("'");
+      int charsOffset = 0;
+      int charsLength = value.length();
+      char charValue;
+      if ((context.getServerStatus() & ServerStatus.NO_BACKSLASH_ESCAPES) > 0) {
+        while (charsOffset < charsLength) {
+          charValue = value.charAt(charsOffset);
+          if (charValue == '\'') {
+            escapeQuery.append('\''); // add a single escape quote
+          }
+          escapeQuery.append(charValue);
+          charsOffset++;
+        }
+      } else {
+        while (charsOffset < charsLength) {
+          charValue = value.charAt(charsOffset);
+          if (charValue == '\'' || charValue == '\\' || charValue == '"' || charValue == 0) {
+            escapeQuery.append('\\'); // add escape slash
+          }
+          escapeQuery.append(charValue);
+          charsOffset++;
+        }
+      }
+      escapeQuery.append("'");
+    }
+    return escapeQuery.toString();
+  }
 
   @Override
   public String getClientInfo(String name) throws SQLException {
+    checkNotClosed();
+    if (!"ApplicationName".equals(name)
+            && !"ClientUser".equals(name)
+            && !"ClientHostname".equals(name)) {
+      throw new SQLException(
+              "name must be \"ApplicationName\", \"ClientUser\" or \"ClientHostname\", but was \""
+                      + name
+                      + "\"");
+    }
+    try (java.sql.Statement statement = createStatement()) {
+      try (ResultSet rs = statement.executeQuery("SELECT @" + name)) {
+        if (rs.next()) {
+          return rs.getString(1);
+        }
+      }
+    }
     return null;
   }
 
   @Override
   public Properties getClientInfo() throws SQLException {
-    return null;
+    checkNotClosed();
+    Properties properties = new Properties();
+    try (java.sql.Statement statement = createStatement()) {
+      try (ResultSet rs =
+                   statement.executeQuery("SELECT @ApplicationName, @ClientUser, @ClientHostname")) {
+        if (rs.next()) {
+          if (rs.getString(1) != null) {
+            properties.setProperty("ApplicationName", rs.getString(1));
+          }
+          if (rs.getString(2) != null) {
+            properties.setProperty("ClientUser", rs.getString(2));
+          }
+          if (rs.getString(3) != null) {
+            properties.setProperty("ClientHostname", rs.getString(3));
+          }
+          return properties;
+        }
+      }
+    }
+    properties.setProperty("ApplicationName", null);
+    properties.setProperty("ClientUser", null);
+    properties.setProperty("ClientHostname", null);
+    return properties;
   }
 
   @Override
-  public void setClientInfo(Properties properties) throws SQLClientInfoException {}
+  public void setClientInfo(Properties properties) throws SQLClientInfoException {
+    Map<String, ClientInfoStatus> propertiesExceptions = new HashMap<>();
+    for (String name : new String[] {"ApplicationName", "ClientUser", "ClientHostname"}) {
+      try {
+        setClientInfo(name, properties.getProperty(name));
+      } catch (SQLClientInfoException e) {
+        propertiesExceptions.putAll(e.getFailedProperties());
+      }
+    }
+
+    if (!propertiesExceptions.isEmpty()) {
+      String errorMsg =
+              "setClientInfo errors : the following properties where not set : "
+                      + propertiesExceptions.keySet();
+      throw new SQLClientInfoException(errorMsg, propertiesExceptions);
+    }
+  }
 
   @Override
   public Array createArrayOf(String typeName, Object[] elements) throws SQLException {
-    return null;
+    throw exceptionFactory.notSupported("Array type is not supported");
   }
 
   @Override
   public Struct createStruct(String typeName, Object[] attributes) throws SQLException {
-    return null;
+    throw exceptionFactory.notSupported("Struct type is not supported");
   }
 
   @Override
   public String getSchema() throws SQLException {
+    // We support only catalog
     return null;
   }
 
   @Override
-  public void setSchema(String schema) throws SQLException {}
+  public void setSchema(String schema) throws SQLException {
+    // We support only catalog, and JDBC indicate "If the driver does not support schemas, it will
+    // silently ignore this request."
+  }
 
   @Override
-  public void abort(Executor executor) throws SQLException {}
+  public void abort(Executor executor) throws SQLException {
+
+    SQLPermission sqlPermission = new SQLPermission("callAbort");
+    SecurityManager securityManager = System.getSecurityManager();
+    if (securityManager != null) {
+      securityManager.checkPermission(sqlPermission);
+    }
+    if (executor == null) {
+      throw exceptionFactory.create("Cannot abort the connection: null executor passed");
+    }
+
+    fireConnectionClosed(new ConnectionEvent(this));
+    boolean lockStatus = lock.tryLock();
+
+    if (this.close.compareAndSet(false, true)) {
+      if (!lockStatus) {
+        // lock not available : query is running
+        // force end by executing an KILL connection
+        try (Connection con = new Connection(conf, hostAddress)) {
+          con.sendQuery(new QueryPacket("KILL " + context.getThreadId()));
+        } catch (SQLException e) {
+          // eat
+        }
+      } else {
+        try {
+          writer.initPacket();
+          QuitPacket.INSTANCE.encode(writer, context);
+          writer.flush();
+        } catch (SQLException | IOException e) {
+          // eat
+        }
+      }
+      closeSocket();
+    }
+
+    if (lockStatus) {
+      lock.unlock();
+    }
+  }
 
   @Override
-  public void setNetworkTimeout(Executor executor, int milliseconds) throws SQLException {}
+  public void setNetworkTimeout(Executor executor, int milliseconds) throws SQLException {
+    if (this.isClosed()) {
+      throw exceptionFactory.create(
+              "Connection.setNetworkTimeout cannot be called on a closed connection");
+    }
+    if (milliseconds < 0) {
+      throw exceptionFactory.create(
+              "Connection.setNetworkTimeout cannot be called with a negative timeout");
+    }
+    SQLPermission sqlPermission = new SQLPermission("setNetworkTimeout");
+    SecurityManager securityManager = System.getSecurityManager();
+    if (securityManager != null) {
+      securityManager.checkPermission(sqlPermission);
+    }
+    try {
+      stateFlag |= ConnectionState.STATE_NETWORK_TIMEOUT;
+      lock.lock();
+      try {
+        this.socketTimeout = milliseconds;
+        socket.setSoTimeout(milliseconds);
+      } finally {
+        lock.unlock();
+      }
+    } catch (SocketException se) {
+      throw exceptionFactory.create("Cannot set the network timeout", se);
+    }
+  }
 
   @Override
   public int getNetworkTimeout() throws SQLException {
-    return 0;
+    return this.socketTimeout;
   }
 
   @Override
   public <T> T unwrap(Class<T> iface) throws SQLException {
-    return null;
+    try {
+      if (isWrapperFor(iface)) {
+        return iface.cast(this);
+      } else {
+        throw new SQLException("The receiver is not a wrapper for " + iface.getName());
+      }
+    } catch (Exception e) {
+      throw new SQLException("The receiver is not a wrapper and does not implement the interface");
+    }
   }
 
   @Override
   public boolean isWrapperFor(Class<?> iface) throws SQLException {
-    return false;
+    return iface.isInstance(this);
   }
 
   @Override
