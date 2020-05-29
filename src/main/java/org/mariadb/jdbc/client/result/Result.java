@@ -84,6 +84,7 @@ public abstract class Result implements Completion, ResultSet {
     row = new TextRowDecoder(maxIndex, metadataList);
   }
 
+  @SuppressWarnings("fallthrough")
   protected boolean readNext() throws SQLException, IOException {
     ReadableByteBuf buf = reader.readPacket(false);
     switch (buf.getUnsignedByte()) {
@@ -405,7 +406,7 @@ public abstract class Result implements Completion, ResultSet {
           String.format(
               "Wrong index position. Is %s but must be in 1-%s range", columnIndex, maxIndex));
     }
-    Codec defaultCodec = metadataList[columnIndex - 1].getDefaultCodec();
+    Codec<?> defaultCodec = metadataList[columnIndex - 1].getDefaultCodec();
     return row.get(columnIndex, defaultCodec);
   }
 

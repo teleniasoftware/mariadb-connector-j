@@ -63,7 +63,8 @@ public class OkPacket implements ServerMessage, Completion {
           switch (stateInfo.readByte()) {
             case StateChange.SESSION_TRACK_SYSTEM_VARIABLES:
               ReadableByteBuf sessionVariableBuf = stateInfo.readLengthBuffer();
-              String variable = sessionVariableBuf.readString(sessionVariableBuf.readLengthNotNull());
+              String variable =
+                  sessionVariableBuf.readString(sessionVariableBuf.readLengthNotNull());
               Integer len = sessionVariableBuf.readLength();
               String value = len == null ? null : sessionVariableBuf.readString(len);
               logger.debug("System variable change :  {} = {}", variable, value);

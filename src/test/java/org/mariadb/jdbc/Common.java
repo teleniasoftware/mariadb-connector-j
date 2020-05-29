@@ -44,12 +44,12 @@ public class Common {
       mDefUrl =
           String.format(
               "jdbc:mariadb://%s:%s/%s?user=%s&password=%s&%s",
-              prop.getProperty("DB_HOST"),
-              prop.getProperty("DB_PORT"),
-              prop.getProperty("DB_DATABASE"),
-              prop.getProperty("DB_USER"),
-              prop.getProperty("DB_PASSWORD"),
-              prop.getProperty("DB_OTHER"));
+              get("DB_HOST", prop),
+              get("DB_PORT", prop),
+              get("DB_DATABASE", prop),
+              get("DB_USER", prop),
+              get("DB_PASSWORD", prop),
+              get("DB_OTHER", prop));
 
     } catch (IOException io) {
       io.printStackTrace();
@@ -57,6 +57,12 @@ public class Common {
   }
 
   public static Connection sharedConn;
+
+  private static String get(String name, Properties prop) {
+    String val = System.getenv(name);
+    if (val == null) val = prop.getProperty(name);
+    return val;
+  }
 
   @BeforeAll
   public static void beforeAll() throws Exception {
@@ -73,23 +79,20 @@ public class Common {
     sharedConn.close();
   }
 
-  public void assertThrows(Class expectedType, Executable executable, String expected) {
-    Throwable e = Assertions.assertThrows(expectedType, executable);
+  public void assertThrows(
+      Class<? extends Exception> expectedType, Executable executable, String expected) {
+    Exception e = Assertions.assertThrows(expectedType, executable);
     Assertions.assertTrue(e.getMessage().contains(expected));
   }
 
   //  @RegisterExtension public Extension watcher = new Follow();
 
   public static boolean isMariaDBServer() {
-    //    MariadbConnectionMetadata meta = sharedConn.getMetadata();
-    //    return meta.isMariaDBServer();
-    return true;
+    return sharedConn.getContext().getVersion().isMariaDBServer();
   }
 
   public static boolean minVersion(int major, int minor, int patch) {
-    //    MariadbConnectionMetadata meta = sharedConn.getMetadata();
-    //    return meta.minVersion(major, minor, patch);
-    return true;
+    return sharedConn.getContext().getVersion().versionGreaterOrEqual(major, minor, patch);
   }
 
   //  public boolean haveSsl(MariadbConnection connection) {

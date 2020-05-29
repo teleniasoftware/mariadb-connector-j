@@ -24,7 +24,6 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Objects;
-import org.mariadb.jdbc.client.ConnectionContext;
 import org.mariadb.jdbc.client.ReadableByteBuf;
 import org.mariadb.jdbc.codec.Codec;
 import org.mariadb.jdbc.codec.DataType;
@@ -42,12 +41,7 @@ public final class ColumnDefinitionPacket implements ServerMessage {
   private boolean useAliasAsName;
 
   private ColumnDefinitionPacket(
-          ReadableByteBuf buf,
-      int charset,
-      long length,
-      DataType dataType,
-      byte decimals,
-      int flags) {
+      ReadableByteBuf buf, int charset, long length, DataType dataType, byte decimals, int flags) {
     this.buf = buf;
     this.charset = charset;
     this.length = length;
@@ -97,8 +91,13 @@ public final class ColumnDefinitionPacket implements ServerMessage {
         break;
     }
 
-    return new ColumnDefinitionPacket(new ReadableByteBuf(null, arr, arr.length),
-         33, len, type, (byte) 0, ColumnFlags.PRIMARY_KEY);
+    return new ColumnDefinitionPacket(
+        new ReadableByteBuf(null, arr, arr.length),
+        33,
+        len,
+        type,
+        (byte) 0,
+        ColumnFlags.PRIMARY_KEY);
   }
 
   public static ColumnDefinitionPacket decode(ReadableByteBuf buf) {
@@ -164,38 +163,38 @@ public final class ColumnDefinitionPacket implements ServerMessage {
   // "select  id, maxlen from information_schema.character_sets, information_schema.collations
   // where character_sets.character_set_name = collations.character_set_name order by id"
   private static final int[] maxCharlen = {
-          0, 2, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 3, 2, 1, 1,
-          1, 0, 1, 2, 1, 1, 1, 1,
-          2, 1, 1, 1, 2, 1, 1, 1,
-          1, 3, 1, 2, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 4, 4, 1,
-          1, 1, 1, 1, 1, 1, 4, 4,
-          0, 1, 1, 1, 4, 4, 0, 1,
-          1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 0, 1, 1, 1,
-          1, 1, 1, 3, 2, 2, 2, 2,
-          2, 1, 2, 3, 1, 1, 1, 2,
-          2, 3, 3, 1, 0, 4, 4, 4,
-          4, 4, 4, 4, 4, 4, 4, 4,
-          4, 4, 4, 4, 4, 4, 4, 4,
-          4, 0, 0, 0, 0, 0, 0, 0,
-          2, 2, 2, 2, 2, 2, 2, 2,
-          2, 2, 2, 2, 2, 2, 2, 2,
-          2, 2, 2, 2, 0, 2, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 2,
-          4, 4, 4, 4, 4, 4, 4, 4,
-          4, 4, 4, 4, 4, 4, 4, 4,
-          4, 4, 4, 4, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0,
-          3, 3, 3, 3, 3, 3, 3, 3,
-          3, 3, 3, 3, 3, 3, 3, 3,
-          3, 3, 3, 3, 0, 3, 4, 4,
-          0, 0, 0, 0, 0, 0, 0, 3,
-          4, 4, 4, 4, 4, 4, 4, 4,
-          4, 4, 4, 4, 4, 4, 4, 4,
-          4, 4, 4, 4, 0, 4, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0
+    0, 2, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 3, 2, 1, 1,
+    1, 0, 1, 2, 1, 1, 1, 1,
+    2, 1, 1, 1, 2, 1, 1, 1,
+    1, 3, 1, 2, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 4, 4, 1,
+    1, 1, 1, 1, 1, 1, 4, 4,
+    0, 1, 1, 1, 4, 4, 0, 1,
+    1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 0, 1, 1, 1,
+    1, 1, 1, 3, 2, 2, 2, 2,
+    2, 1, 2, 3, 1, 1, 1, 2,
+    2, 3, 3, 1, 0, 4, 4, 4,
+    4, 4, 4, 4, 4, 4, 4, 4,
+    4, 4, 4, 4, 4, 4, 4, 4,
+    4, 0, 0, 0, 0, 0, 0, 0,
+    2, 2, 2, 2, 2, 2, 2, 2,
+    2, 2, 2, 2, 2, 2, 2, 2,
+    2, 2, 2, 2, 0, 2, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 2,
+    4, 4, 4, 4, 4, 4, 4, 4,
+    4, 4, 4, 4, 4, 4, 4, 4,
+    4, 4, 4, 4, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    3, 3, 3, 3, 3, 3, 3, 3,
+    3, 3, 3, 3, 3, 3, 3, 3,
+    3, 3, 3, 3, 0, 3, 4, 4,
+    0, 0, 0, 0, 0, 0, 0, 3,
+    4, 4, 4, 4, 4, 4, 4, 4,
+    4, 4, 4, 4, 4, 4, 4, 4,
+    4, 4, 4, 4, 0, 4, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0
   };
 
   public int getDisplaySize() {

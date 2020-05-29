@@ -696,23 +696,25 @@ public class Statement implements java.sql.Statement {
         }
         if (result.streaming()
             && (con.getContext().getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0) {
-          results.add(con.readPacket(
-              this,
-              null,
-              maxRows,
-              fetchSize,
-              resultSetConcurrency,
-              resultSetScrollType,
-              closeOnCompletion));
+          results.add(
+              con.readPacket(
+                  this,
+                  null,
+                  maxRows,
+                  fetchSize,
+                  resultSetConcurrency,
+                  resultSetScrollType,
+                  closeOnCompletion));
           while ((con.getContext().getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0) {
-            results.add(con.readPacket(
-                this,
-                null,
-                maxRows,
-                fetchSize,
-                resultSetConcurrency,
-                resultSetScrollType,
-                closeOnCompletion));
+            results.add(
+                con.readPacket(
+                    this,
+                    null,
+                    maxRows,
+                    fetchSize,
+                    resultSetConcurrency,
+                    resultSetScrollType,
+                    closeOnCompletion));
           }
         }
       } finally {
@@ -743,23 +745,25 @@ public class Statement implements java.sql.Statement {
         result.fetchRemaining();
         if (result.streaming()
             && (con.getContext().getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0) {
-          results.add(con.readPacket(
-              this,
-              null,
-              maxRows,
-              0,
-              resultSetConcurrency,
-              resultSetScrollType,
-              closeOnCompletion));
+          results.add(
+              con.readPacket(
+                  this,
+                  null,
+                  maxRows,
+                  0,
+                  resultSetConcurrency,
+                  resultSetScrollType,
+                  closeOnCompletion));
           while ((con.getContext().getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0) {
-            results.add(con.readPacket(
-                this,
-                null,
-                maxRows,
-                0,
-                resultSetConcurrency,
-                resultSetScrollType,
-                closeOnCompletion));
+            results.add(
+                con.readPacket(
+                    this,
+                    null,
+                    maxRows,
+                    0,
+                    resultSetConcurrency,
+                    resultSetScrollType,
+                    closeOnCompletion));
           }
         }
       }

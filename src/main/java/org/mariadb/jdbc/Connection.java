@@ -335,35 +335,28 @@ public class Connection implements java.sql.Connection, PooledConnection {
       int resultSetScrollType,
       boolean closeOnCompletion)
       throws SQLException {
-
-    Completion completion = readPacket(
-        stmt,
-        sql,
-        maxRows,
-        fetchSize,
-        resultSetConcurrency,
-        resultSetScrollType,
-        closeOnCompletion);
-
-    if ((context.getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) == 0) {
-      if (fetchSize == 0) return Collections.singletonList(completion);
-      List<Completion> completions = new ArrayList<>();
-      completions.add(completion);
-      return completions;
-    }
-
     List<Completion> completions = new ArrayList<>();
-    completions.add(completion);
-    do {
-      readPacket(
-          stmt,
-          sql,
-          maxRows,
-          fetchSize,
-          resultSetConcurrency,
-          resultSetScrollType,
-          closeOnCompletion);
-    } while ((context.getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0);
+    completions.add(
+        readPacket(
+            stmt,
+            sql,
+            maxRows,
+            fetchSize,
+            resultSetConcurrency,
+            resultSetScrollType,
+            closeOnCompletion));
+
+    while ((context.getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0) {
+      completions.add(
+          readPacket(
+              stmt,
+              sql,
+              maxRows,
+              fetchSize,
+              resultSetConcurrency,
+              resultSetScrollType,
+              closeOnCompletion));
+    }
     return completions;
   }
 
@@ -435,7 +428,10 @@ public class Connection implements java.sql.Connection, PooledConnection {
 
           Result result;
           if (fetchSize != 0) {
-            context.setServerStatus(context.getServerStatus() ^ ServerStatus.MORE_RESULTS_EXISTS);
+            if ((context.getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0) {
+              context.setServerStatus(context.getServerStatus() - ServerStatus.MORE_RESULTS_EXISTS);
+            }
+
             result =
                 new StreamingResult(
                     stmt,

@@ -96,6 +96,7 @@ public abstract class RowDecoder {
 
   public abstract void setPosition(int position);
 
+  @SuppressWarnings("unchecked")
   public <T> T get(int index, Class<T> type) throws SQLException {
     if (buf == null) {
       throw new SQLDataException("wrong row position", "22023");

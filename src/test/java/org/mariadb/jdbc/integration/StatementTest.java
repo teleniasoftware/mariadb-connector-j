@@ -364,25 +364,25 @@ public class StatementTest extends Common {
   @Test
   public void fetchUnFinishedOtherStatement() throws SQLException {
     Statement stmt = sharedConn.createStatement();
-    stmt.setFetchSize(10);
-    Assertions.assertEquals(10, stmt.getFetchSize());
-    ResultSet rs = stmt.executeQuery("select * FROM seq_1_to_1000");
+    stmt.setFetchSize(5);
+    Assertions.assertEquals(5, stmt.getFetchSize());
+    ResultSet rs = stmt.executeQuery("select * FROM seq_1_to_20");
 
-    for (int i = 1; i <= 500; i++) {
+    for (int i = 1; i <= 10; i++) {
       Assertions.assertTrue(rs.next());
       Assertions.assertEquals(i, rs.getInt(1));
     }
 
     Statement stmt2 = sharedConn.createStatement();
-    ResultSet rs2 = stmt2.executeQuery("select * FROM seq_1_to_1000");
+    ResultSet rs2 = stmt2.executeQuery("select * FROM seq_1_to_20");
 
-    for (int i = 501; i <= 1000; i++) {
+    for (int i = 11; i <= 20; i++) {
       Assertions.assertTrue(rs.next());
       Assertions.assertEquals(i, rs.getInt(1));
     }
     Assertions.assertFalse(rs.next());
 
-    for (int i = 1; i <= 1000; i++) {
+    for (int i = 1; i <= 20; i++) {
       Assertions.assertTrue(rs2.next());
       Assertions.assertEquals(i, rs2.getInt(1));
     }
@@ -411,5 +411,4 @@ public class StatementTest extends Common {
     }
     Assertions.assertFalse(rs2.next());
   }
-
 }
