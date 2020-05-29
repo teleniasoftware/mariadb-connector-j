@@ -31,7 +31,7 @@ for i in {60..0}; do
     if echo 'SELECT 1' | "${mysql[@]}" &> /dev/null; then
         break
     fi
-    echo 'data server still not active'
+    echo 'server still not up'
     sleep 1
 done
 
