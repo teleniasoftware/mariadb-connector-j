@@ -1,3 +1,3 @@
 package org.mariadb.jdbc.client;
 
-public interface Completion {}
+public class Completion {}

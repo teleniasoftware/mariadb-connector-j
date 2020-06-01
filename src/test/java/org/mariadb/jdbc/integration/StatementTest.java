@@ -43,6 +43,15 @@ public class StatementTest extends Common {
     Assertions.assertEquals(0, stmt.getUpdateCount());
     Assertions.assertFalse(stmt.getMoreResults());
     Assertions.assertEquals(-1, stmt.getUpdateCount());
+
+    Assertions.assertTrue(stmt.execute("SELECT 1", new int[] {1, 2}));
+    rs = stmt.getGeneratedKeys();
+    Assertions.assertFalse(rs.next());
+
+    Assertions.assertTrue(stmt.execute("SELECT 1", new String[] {"test", "test2"}));
+    rs = stmt.getGeneratedKeys();
+    Assertions.assertFalse(rs.next());
+
     stmt.close();
   }
 
@@ -72,6 +81,14 @@ public class StatementTest extends Common {
     Assertions.assertFalse(stmt.getMoreResults());
     Assertions.assertEquals(-1, stmt.getUpdateCount());
 
+    Assertions.assertEquals(
+            2, stmt.executeUpdate("UPDATE StatementTest SET t2 = 150 WHERE t2 > 100", new int[]{1, 2}));
+    Assertions.assertEquals(2, stmt.getUpdateCount());
+
+    Assertions.assertEquals(
+            2, stmt.executeUpdate("UPDATE StatementTest SET t2 = 150 WHERE t2 > 100", new String[]{"test", "test2"}));
+    Assertions.assertEquals(2, stmt.getUpdateCount());
+
     try {
       stmt.executeUpdate("SELECT 1");
       Assertions.fail();
@@ -81,6 +98,35 @@ public class StatementTest extends Common {
               .contains("the given SQL statement produces an unexpected ResultSet object"));
     }
     Assertions.assertEquals(0, stmt.executeUpdate("DO 1"));
+  }
+
+  @Test
+  public void executeLargeUpdate() throws SQLException {
+    Statement stmt = sharedConn.createStatement();
+    stmt.execute("INSERT INTO StatementTest(t1, t2) values (1, 110), (2, 120)");
+    Assertions.assertEquals(
+            2, stmt.executeLargeUpdate("UPDATE StatementTest SET t2 = 130 WHERE t2 > 100"));
+    Assertions.assertEquals(2L, stmt.getLargeUpdateCount());
+    Assertions.assertFalse(stmt.getMoreResults());
+    Assertions.assertEquals(-1L, stmt.getLargeUpdateCount());
+
+    Assertions.assertEquals(
+            2, stmt.executeLargeUpdate("UPDATE StatementTest SET t2 = 150 WHERE t2 > 100", new int[]{1, 2}));
+    Assertions.assertEquals(2L, stmt.getLargeUpdateCount());
+
+    Assertions.assertEquals(
+            2, stmt.executeLargeUpdate("UPDATE StatementTest SET t2 = 150 WHERE t2 > 100", new String[]{"test", "test2"}));
+    Assertions.assertEquals(2L, stmt.getLargeUpdateCount());
+
+    try {
+      stmt.executeLargeUpdate("SELECT 1");
+      Assertions.fail();
+    } catch (SQLException sqle) {
+      Assertions.assertTrue(
+              sqle.getMessage()
+                      .contains("the given SQL statement produces an unexpected ResultSet object"));
+    }
+    Assertions.assertEquals(0, stmt.executeLargeUpdate("DO 1"));
   }
 
   @Test
@@ -110,6 +156,32 @@ public class StatementTest extends Common {
     stmt.close();
     Assertions.assertTrue(stmt.isClosed());
     Assertions.assertTrue(rs.isClosed());
+
+    assertThrows(
+            SQLException.class,
+            () -> stmt.clearBatch(),
+            "Cannot do an operation on a closed statement");
+    assertThrows(
+            SQLException.class,
+            () -> stmt.isPoolable(),
+            "Cannot do an operation on a closed statement");
+    assertThrows(
+            SQLException.class,
+            () -> stmt.setPoolable(true),
+            "Cannot do an operation on a closed statement");
+    assertThrows(
+            SQLException.class,
+            () -> stmt.closeOnCompletion(),
+            "Cannot do an operation on a closed statement");
+    assertThrows(
+            SQLException.class,
+            () -> stmt.isCloseOnCompletion(),
+            "Cannot do an operation on a closed statement");
+
+  assertThrows(
+            SQLException.class,
+            () -> stmt.getResultSetConcurrency(),
+            "Cannot do an operation on a closed statement");
     assertThrows(
         SQLException.class,
         () -> stmt.getFetchSize(),
@@ -149,13 +221,30 @@ public class StatementTest extends Common {
         () -> stmt.getMaxRows(),
         "Cannot do an operation on a closed statement");
     assertThrows(
+            SQLException.class,
+            () -> stmt.getLargeMaxRows(),
+            "Cannot do an operation on a closed statement");
+
+    assertThrows(
         SQLException.class,
         () -> stmt.setMaxRows(1),
         "Cannot do an operation on a closed statement");
     assertThrows(
         SQLException.class,
         () -> stmt.setEscapeProcessing(true),
-        "Cannot do an operation on a closed " + "statement");
+        "Cannot do an operation on a closed statement");
+    assertThrows(
+            SQLException.class,
+            () -> stmt.getQueryTimeout(),
+            "Cannot do an operation on a closed statement");
+    assertThrows(
+            SQLException.class,
+            () -> stmt.getUpdateCount(),
+            "Cannot do an operation on a closed statement");
+    assertThrows(
+            SQLException.class,
+            () -> stmt.getLargeUpdateCount(),
+            "Cannot do an operation on a closed statement");
   }
 
   @Test
@@ -175,6 +264,48 @@ public class StatementTest extends Common {
 
     ResultSet rs = stmt.executeQuery("SELECT * FROM seq_1_to_10000");
     int i = 0;
+    while (rs.next()) {
+      i++;
+      Assertions.assertEquals(i, rs.getInt(1));
+    }
+    Assertions.assertEquals(10, i);
+
+    stmt.setQueryTimeout(2);
+    rs = stmt.executeQuery("SELECT * FROM seq_1_to_10000");
+    i = 0;
+    while (rs.next()) {
+      i++;
+      Assertions.assertEquals(i, rs.getInt(1));
+    }
+    Assertions.assertEquals(10, i);
+  }
+
+  @Test
+  public void largeMaxRows() throws SQLException {
+    Assumptions.assumeTrue(isMariaDBServer());
+    Statement stmt = sharedConn.createStatement();
+    Assertions.assertEquals(0L, stmt.getLargeMaxRows());
+    try {
+      stmt.setLargeMaxRows(-1);
+      Assertions.fail();
+    } catch (SQLException e) {
+      Assertions.assertTrue(e.getMessage().contains("max rows cannot be negative"));
+    }
+
+    stmt.setLargeMaxRows(10);
+    Assertions.assertEquals(10L, stmt.getLargeMaxRows());
+
+    ResultSet rs = stmt.executeQuery("SELECT * FROM seq_1_to_10000");
+    int i = 0;
+    while (rs.next()) {
+      i++;
+      Assertions.assertEquals(i, rs.getInt(1));
+    }
+    Assertions.assertEquals(10, i);
+
+    stmt.setQueryTimeout(2);
+    rs = stmt.executeQuery("SELECT * FROM seq_1_to_10000");
+    i = 0;
     while (rs.next()) {
       i++;
       Assertions.assertEquals(i, rs.getInt(1));
@@ -203,18 +334,10 @@ public class StatementTest extends Common {
     Assertions.assertEquals(ResultSet.FETCH_FORWARD, stmt.getFetchDirection());
     Assertions.assertEquals(ResultSet.CONCUR_READ_ONLY, stmt.getResultSetConcurrency());
     Assertions.assertEquals(ResultSet.TYPE_FORWARD_ONLY, stmt.getResultSetType());
-  }
-
-  @Test
-  public void closeOnCompletion() throws SQLException {
-    Statement stmt = sharedConn.createStatement();
-    stmt.closeOnCompletion();
-    ResultSet rs = stmt.executeQuery("SELECT 1");
-    Assertions.assertFalse(stmt.isClosed());
-    Assertions.assertFalse(rs.isClosed());
-    rs.close();
-    Assertions.assertTrue(rs.isClosed());
-    Assertions.assertTrue(stmt.isClosed());
+    Assertions.assertEquals(ResultSet.HOLD_CURSORS_OVER_COMMIT, stmt.getResultSetHoldability());
+    Assertions.assertEquals(0, stmt.getMaxFieldSize());
+    stmt.setMaxFieldSize(100);
+    Assertions.assertEquals(0, stmt.getMaxFieldSize());
   }
 
   @Test
@@ -244,6 +367,7 @@ public class StatementTest extends Common {
         SQLTimeoutException.class,
         () -> {
           stmt.setQueryTimeout(1);
+          Assertions.assertEquals(1, stmt.getQueryTimeout());
           stmt.execute(
               "select * from information_schema.columns as c1,  information_schema.tables, information_schema"
                   + ".tables as t2");
@@ -326,6 +450,9 @@ public class StatementTest extends Common {
   public void fetch() throws SQLException {
     Assumptions.assumeTrue(isMariaDBServer());
     Statement stmt = sharedConn.createStatement();
+    assertThrows(
+            SQLException.class, () -> stmt.setFetchSize(-10), "invalid fetch size");
+
     stmt.setFetchSize(10);
     Assertions.assertEquals(10, stmt.getFetchSize());
     ResultSet rs = stmt.executeQuery("select * FROM seq_1_to_10000");
@@ -418,4 +545,122 @@ public class StatementTest extends Common {
     }
     Assertions.assertFalse(rs2.next());
   }
+
+  @Test
+  public void executeBatchBasic() throws SQLException {
+    Statement stmt = sharedConn.createStatement();
+    stmt.execute("DROP TABLE IF EXISTS executeBatchBasic");
+    stmt.execute("CREATE TABLE executeBatchBasic (t1 int not null primary key auto_increment, t2 int)");
+
+    assertThrows(
+            SQLException.class,
+            () -> stmt.addBatch(null),
+            "null cannot be set to addBatch(String sql)");
+
+
+    stmt.addBatch("INSERT INTO executeBatchBasic(t2) VALUES (55)");
+    stmt.addBatch("INSERT INTO executeBatchBasic(t2) VALUES (56)");
+    int[] ret = stmt.executeBatch();
+    Assertions.assertArrayEquals(new int[] {1,1},ret);
+
+    ret = stmt.executeBatch();
+    Assertions.assertArrayEquals(new int[0],ret);
+
+    stmt.addBatch("INSERT INTO executeLargeBatchBasic(t2) VALUES (57)");
+    stmt.clearBatch();
+    ret = stmt.executeBatch();
+    Assertions.assertArrayEquals(new int[0],ret);
+
+    stmt.addBatch("WRONG QUERY");
+    assertThrows(
+            BatchUpdateException.class,
+            () -> stmt.executeBatch(),
+            "You have an error in your SQL syntax");
+  }
+
+  @Test
+  public void executeLargeBatchBasic() throws SQLException {
+    Statement stmt = sharedConn.createStatement();
+    stmt.execute("DROP TABLE IF EXISTS executeLargeBatchBasic");
+    stmt.execute("CREATE TABLE executeLargeBatchBasic (t1 int not null primary key auto_increment, t2 int)");
+    stmt.addBatch("INSERT INTO executeLargeBatchBasic(t2) VALUES (55)");
+    stmt.addBatch("INSERT INTO executeLargeBatchBasic(t2) VALUES (56)");
+    long[] ret = stmt.executeLargeBatch();
+    Assertions.assertArrayEquals(new long[] {1,1},ret);
+
+    ret = stmt.executeLargeBatch();
+    Assertions.assertArrayEquals(new long[0],ret);
+
+    stmt.addBatch("INSERT INTO executeLargeBatchBasic(t2) VALUES (57)");
+    stmt.clearBatch();
+    ret = stmt.executeLargeBatch();
+    Assertions.assertArrayEquals(new long[0],ret);
+
+    stmt.addBatch("WRONG QUERY");
+    assertThrows(
+            BatchUpdateException.class,
+            () -> stmt.executeLargeBatch(),
+            "You have an error in your SQL syntax");
+  }
+
+  @Test
+  public void moreResults() throws SQLException {
+    Statement stmt = sharedConn.createStatement();
+    stmt.execute("DROP PROCEDURE IF EXISTS multi");
+    stmt.setFetchSize(3);
+    stmt.execute("CREATE PROCEDURE multi() BEGIN SELECT * from seq_1_to_10; SELECT * FROM seq_1_to_1000;SELECT 2; END");
+    stmt.execute("CALL multi()");
+    Assertions.assertTrue(stmt.getMoreResults());
+    ResultSet rs = stmt.getResultSet();
+    int i = 1;
+    while (rs.next()) {
+      Assertions.assertEquals(i++, rs.getInt(1));
+    }
+
+    stmt.setFetchSize(3);
+    rs = stmt.executeQuery("CALL multi()");
+    Assertions.assertFalse(rs.isClosed());
+    stmt.setFetchSize(0); // force more result to load all remaining result-set
+    Assertions.assertTrue(stmt.getMoreResults());
+    Assertions.assertTrue(rs.isClosed());
+    rs = stmt.getResultSet();
+    i = 1;
+    while (rs.next()) {
+      Assertions.assertEquals(i++, rs.getInt(1));
+    }
+
+    stmt.setFetchSize(3);
+    rs = stmt.executeQuery("CALL multi()");
+    Assertions.assertFalse(rs.isClosed());
+    stmt.setFetchSize(0); // force more result to load all remaining result-set
+    Assertions.assertTrue(stmt.getMoreResults(java.sql.Statement.KEEP_CURRENT_RESULT));
+    Assertions.assertFalse(rs.isClosed());
+    i = 1;
+    while (rs.next()) {
+      Assertions.assertEquals(i++, rs.getInt(1));
+    }
+    Assertions.assertEquals(11, i);
+    rs = stmt.getResultSet();
+    i = 1;
+    while (rs.next()) {
+      Assertions.assertEquals(i++, rs.getInt(1));
+    }
+    Assertions.assertEquals(1001, i);
+  }
+
+  @Test
+  public void closeOnCompletion() throws SQLException {
+    Statement stmt = sharedConn.createStatement();
+    Assertions.assertFalse(stmt.isCloseOnCompletion());
+    stmt.closeOnCompletion();
+    Assertions.assertTrue(stmt.isCloseOnCompletion());
+    Assertions.assertFalse(stmt.isClosed());
+    ResultSet rs = stmt.executeQuery("SELECT 1");
+    Assertions.assertFalse(rs.isClosed());
+    Assertions.assertFalse(stmt.isClosed());
+    rs.close();
+    Assertions.assertTrue(rs.isClosed());
+    Assertions.assertTrue(stmt.isClosed());
+  }
+
 }

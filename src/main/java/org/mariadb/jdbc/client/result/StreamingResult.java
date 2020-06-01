@@ -21,7 +21,6 @@ public class StreamingResult extends Result {
       ColumnDefinitionPacket[] metadataList,
       PacketReader reader,
       ConnectionContext context,
-      int maxRows,
       int fetchSize,
       ReentrantLock lock,
       int resultSetType,
@@ -29,7 +28,7 @@ public class StreamingResult extends Result {
       throws IOException, SQLException {
 
     super(
-        stmt, text, metadataList, reader, context, maxRows, resultSetType, closeOnCompletion);
+        stmt, text, metadataList, reader, context, resultSetType, closeOnCompletion);
     this.lock = lock;
     this.dataFetchTime = 0;
     this.fetchSize = fetchSize;

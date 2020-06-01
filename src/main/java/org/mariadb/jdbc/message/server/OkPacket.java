@@ -25,7 +25,7 @@ import org.mariadb.jdbc.util.constants.StateChange;
 import org.mariadb.jdbc.util.log.Logger;
 import org.mariadb.jdbc.util.log.Loggers;
 
-public class OkPacket implements ServerMessage, Completion {
+public class OkPacket extends Completion implements ServerMessage {
   public static final byte TYPE = (byte) 0x00;
   private static final Logger logger = Loggers.getLogger(OkPacket.class);
   private final long affectedRows;

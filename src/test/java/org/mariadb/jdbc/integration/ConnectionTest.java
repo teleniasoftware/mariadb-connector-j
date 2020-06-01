@@ -1,7 +1,10 @@
 package org.mariadb.jdbc.integration;
 
 import java.sql.*;
+import java.util.concurrent.Executor;
+
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.mariadb.jdbc.Common;
 import org.mariadb.jdbc.Connection;
@@ -213,5 +216,85 @@ public class ConnectionTest extends Common {
                 + ", {fn convert(?, SQL_NUMERIC)}"
                 + ", {fn convert(?, SQL_TIMESTAMP)}"
                 + ", {fn convert(?, SQL_DATETIME)}"));
+  }
+
+  @Test
+  public void readOnly() throws SQLException {
+    Statement stmt = sharedConn.createStatement();
+    stmt.execute("DROP TABLE IF EXISTS testReadOnly");
+    stmt.execute("CREATE TABLE testReadOnly(id int)");
+    sharedConn.setAutoCommit(false);
+    sharedConn.setReadOnly(true);
+    stmt.execute("INSERT INTO testReadOnly values (1)");
+    sharedConn.commit();
+
+    try (Connection con = createCon("assureReadOnly=true")) {
+      final Statement stmt2 = con.createStatement();
+
+      con.setAutoCommit(false);
+      con.setReadOnly(true);
+      assertThrows(SQLException.class,
+          () -> stmt2.execute("INSERT INTO testReadOnly values (2)"),
+          "Cannot execute statement in a READ ONLY transaction");
+      con.setReadOnly(false);
+      stmt2.execute("DROP TABLE testReadOnly");
+    }
+  }
+
+  @Test
+  public void databaseStateChange() throws SQLException {
+    Assumptions.assumeTrue(
+            (isMariaDBServer() && minVersion(10, 2, 0)) || (!isMariaDBServer() && minVersion(5, 7, 0)));
+    try (Connection connection = createCon()) {
+      try (Statement stmt = connection.createStatement()) {
+        stmt.execute("drop database if exists _test_db");
+        stmt.execute("create database _test_db");
+        ResultSet rs = stmt.executeQuery("SELECT DATABASE()");
+        rs.next();
+        Assertions.assertEquals(rs.getString(1), connection.getCatalog());
+        stmt.execute("USE _test_db");
+        Assertions.assertEquals("_test_db", connection.getCatalog());
+        stmt.execute("drop database _test_db");
+      }
+    }
+  }
+
+  @Test
+  public void checkFixedData() throws SQLException {
+    sharedConn.unwrap(java.sql.Connection.class);
+    assertThrows(
+            SQLException.class,
+            () -> sharedConn.unwrap(String.class),
+            "The receiver is not a wrapper for java.lang.String");
+    Assertions.assertEquals(sharedConn, sharedConn.getConnection());
+  }
+  @Test
+  public void networkTimeoutTest() throws SQLException {
+    try (Connection connection = createCon()) {
+      Assertions.assertEquals(0, connection.getNetworkTimeout());
+      int timeout = 1000;
+      SQLPermission sqlPermission = new SQLPermission("setNetworkTimeout");
+      SecurityManager securityManager = System.getSecurityManager();
+      if (securityManager != null) {
+        try {
+          securityManager.checkPermission(sqlPermission);
+        } catch (SecurityException se) {
+          System.out.println("test 'setNetworkTimeout' skipped  due to missing policy");
+          return;
+        }
+      }
+      Executor executor = Runnable::run;
+      connection.setNetworkTimeout(executor, timeout);
+      connection.isValid(2);
+      Assertions.assertEquals(timeout, connection.getNetworkTimeout());
+
+      try {
+        Statement stmt = connection.createStatement();
+        stmt.execute("select sleep(2)");
+        Assertions.fail("Network timeout is " + timeout / 1000 + "sec, but slept for 2 sec");
+      } catch (SQLException sqlex) {
+        Assertions.assertTrue(connection.isClosed());
+      }
+    }
   }
 }

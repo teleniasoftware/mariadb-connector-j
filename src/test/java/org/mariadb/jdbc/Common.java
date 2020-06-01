@@ -64,6 +64,14 @@ public class Common {
     return val;
   }
 
+  public Connection createCon() throws SQLException {
+    return (Connection) DriverManager.getConnection(mDefUrl);
+  }
+  public Connection createCon(String option) throws SQLException {
+    return (Connection) DriverManager.getConnection(mDefUrl + "&" + option);
+  }
+
+
   @BeforeAll
   public static void beforeAll() throws Exception {
     sharedConn = (Connection) DriverManager.getConnection(mDefUrl);
@@ -82,7 +90,7 @@ public class Common {
   public void assertThrows(
       Class<? extends Exception> expectedType, Executable executable, String expected) {
     Exception e = Assertions.assertThrows(expectedType, executable);
-    Assertions.assertTrue(e.getMessage().contains(expected));
+    Assertions.assertTrue(e.getMessage().contains(expected), "real message:" + e.getMessage());
   }
 
   //  @RegisterExtension public Extension watcher = new Follow();

@@ -22,13 +22,12 @@ public class CompleteResult extends Result {
       ColumnDefinitionPacket[] metadataList,
       PacketReader reader,
       ConnectionContext context,
-      int maxRows,
       int resultSetType,
       boolean closeOnCompletion)
       throws IOException, SQLException {
 
     super(
-        stmt, text, metadataList, reader, context, maxRows, resultSetType, closeOnCompletion);
+        stmt, text, metadataList, reader, context, resultSetType, closeOnCompletion);
     this.data = new ArrayList<>(10);
     while (readNext()) {}
     loaded = true;

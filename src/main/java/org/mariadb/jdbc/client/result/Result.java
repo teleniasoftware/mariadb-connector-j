@@ -24,15 +24,13 @@ import org.mariadb.jdbc.message.server.ColumnDefinitionPacket;
 import org.mariadb.jdbc.message.server.ErrorPacket;
 import org.mariadb.jdbc.util.exceptions.ExceptionFactory;
 
-public abstract class Result implements Completion, ResultSet {
+public abstract class Result extends Completion implements ResultSet {
 
   private final boolean text;
   private final ColumnDefinitionPacket[] metadataList;
   private final int maxIndex;
   private final ConnectionContext context;
-  private final int maxRows;
   private Statement statement;
-  private int currRows = 0;
   protected RowDecoder row;
 
   protected final int resultSetType;
@@ -50,7 +48,6 @@ public abstract class Result implements Completion, ResultSet {
       ColumnDefinitionPacket[] metadataList,
       PacketReader reader,
       ConnectionContext context,
-      int maxRows,
       int resultSetType,
       boolean closeOnCompletion) {
     this.statement = stmt;
@@ -61,7 +58,6 @@ public abstract class Result implements Completion, ResultSet {
     this.reader = reader;
     this.exceptionFactory = context.getExceptionFactory();
     this.context = context;
-    this.maxRows = maxRows;
     this.resultSetType = resultSetType;
     row = new TextRowDecoder(this.maxIndex, metadataList);
   }
@@ -77,7 +73,6 @@ public abstract class Result implements Completion, ResultSet {
     this.exceptionFactory = exceptionFactory;
     this.context = null;
     this.data = data;
-    this.maxRows = 0;
     this.statement = null;
     this.resultSetType = TYPE_FORWARD_ONLY;
     this.closeOnCompletion = false;
@@ -122,12 +117,7 @@ public abstract class Result implements Completion, ResultSet {
         // continue reading rows
 
       default:
-        if (maxRows == 0 || (maxRows > 0 && currRows++ < maxRows)) {
           data.add(buf);
-        } else {
-          skipRemaining();
-          return false;
-        }
     }
     return true;
   }
@@ -182,6 +172,7 @@ public abstract class Result implements Completion, ResultSet {
 
   @Override
   public void close() throws SQLException {
+    this.fetchRemaining();
     this.closed = true;
     if (closeOnCompletion) {
       statement.close();

@@ -1,10 +1,12 @@
 package org.mariadb.jdbc.util.exceptions;
 
 import java.sql.*;
+import java.util.List;
 import javax.sql.ConnectionEvent;
 import javax.sql.StatementEvent;
 import org.mariadb.jdbc.Connection;
 import org.mariadb.jdbc.HostAddress;
+import org.mariadb.jdbc.message.server.OkPacket;
 import org.mariadb.jdbc.util.options.Options;
 
 public class ExceptionFactory {
@@ -37,6 +39,18 @@ public class ExceptionFactory {
     this.hostAddress = hostAddress;
     this.threadId = threadId;
     this.statement = statement;
+  }
+
+  public BatchUpdateException createBatchUpdate(List<OkPacket> res, int length, SQLException sqle) {
+    int[] updateCounts = new int[length];
+    for (int i = 0; i < length; i++) {
+      if (i < res.size()) {
+        updateCounts[i] = (int) res.get(i).getAffectedRows();
+      } else {
+        updateCounts[i] = org.mariadb.jdbc.Statement.EXECUTE_FAILED;
+      }
+    }
+    return new BatchUpdateException(updateCounts, sqle);
   }
 
   public ExceptionFactory of(Statement statement) {

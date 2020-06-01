@@ -20,6 +20,7 @@ import org.mariadb.jdbc.Configuration;
 import org.mariadb.jdbc.HostAddress;
 import org.mariadb.jdbc.client.socket.SocketHandlerFunction;
 import org.mariadb.jdbc.client.socket.SocketUtility;
+import org.mariadb.jdbc.message.client.QueryPacket;
 import org.mariadb.jdbc.message.client.SslRequestPacket;
 import org.mariadb.jdbc.message.server.AuthSwitchPacket;
 import org.mariadb.jdbc.message.server.ErrorPacket;
@@ -31,6 +32,7 @@ import org.mariadb.jdbc.plugin.credential.CredentialPlugin;
 import org.mariadb.jdbc.plugin.tls.TlsSocketPlugin;
 import org.mariadb.jdbc.plugin.tls.TlsSocketPluginLoader;
 import org.mariadb.jdbc.util.ConfigurableSocketFactory;
+import org.mariadb.jdbc.util.Security;
 import org.mariadb.jdbc.util.constants.Capabilities;
 import org.mariadb.jdbc.util.options.Options;
 
@@ -415,5 +417,44 @@ public class ConnectionHelper {
       // TODO write compression handler
       throw new SQLFeatureNotSupportedException("Compression not implemented yet !");
     }
+  }
+
+
+  public static void sendSessionInfos(ConnectionContext context, Options options, PacketWriter writer) throws IOException,
+          SQLException {
+    // In JDBC, connection must start in autocommit mode
+    // [CONJ-269] we cannot rely on serverStatus & ServerStatus.AUTOCOMMIT before this command to
+    // avoid this command.
+    // if autocommit=0 is set on server configuration, DB always send Autocommit on serverStatus
+    // flag
+    // after setting autocommit, we can rely on serverStatus value
+    StringBuilder sessionOption =
+            new StringBuilder("autocommit=").append(options.autocommit ? "1" : "0");
+    if ((context.getServerCapabilities() & Capabilities.CLIENT_SESSION_TRACK) != 0) {
+      sessionOption.append(", session_track_schema=1");
+      if (options.rewriteBatchedStatements) {
+        sessionOption.append(", session_track_system_variables='auto_increment_increment' ");
+      }
+    }
+
+    if (options.jdbcCompliantTruncation) {
+      sessionOption.append(", sql_mode = concat(@@sql_mode,',STRICT_TRANS_TABLES')");
+    }
+
+    if (options.sessionVariables != null && !options.sessionVariables.isEmpty()) {
+      sessionOption.append(",").append(Security.parseSessionVariables(options.sessionVariables));
+    }
+    writer.initPacket();
+    new QueryPacket("set " + sessionOption.toString()).encode(writer, context);
+    writer.flush();
+  }
+
+  public static void sendRequestSessionVariables(ConnectionContext context,PacketWriter writer) throws SQLException, IOException {
+    writer.initPacket();
+    new QueryPacket("SELECT @@max_allowed_packet,"
+            + "@@system_time_zone,"
+            + "@@time_zone,"
+            + "@@auto_increment_increment").encode(writer, context);
+    writer.flush();
   }
 }

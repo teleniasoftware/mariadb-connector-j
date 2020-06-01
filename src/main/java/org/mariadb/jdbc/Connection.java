@@ -1,17 +1,5 @@
 package org.mariadb.jdbc;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.Socket;
-import java.net.SocketException;
-import java.sql.*;
-import java.util.*;
-import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReentrantLock;
-import javax.net.ssl.SSLSocket;
-import javax.sql.*;
 import org.mariadb.jdbc.client.*;
 import org.mariadb.jdbc.client.result.CompleteResult;
 import org.mariadb.jdbc.client.result.Result;
@@ -28,9 +16,26 @@ import org.mariadb.jdbc.util.constants.Capabilities;
 import org.mariadb.jdbc.util.constants.ConnectionState;
 import org.mariadb.jdbc.util.constants.ServerStatus;
 import org.mariadb.jdbc.util.exceptions.ExceptionFactory;
+import org.mariadb.jdbc.util.log.Logger;
+import org.mariadb.jdbc.util.log.Loggers;
 import org.mariadb.jdbc.util.options.Options;
 
+import javax.net.ssl.SSLSocket;
+import javax.sql.*;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.Socket;
+import java.net.SocketException;
+import java.sql.*;
+import java.util.*;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
+
 public class Connection implements java.sql.Connection, PooledConnection {
+
+  private static final Logger logger = Loggers.getLogger(Connection.class);
 
   private final Socket socket;
   private final ConnectionContext context;
@@ -105,39 +110,25 @@ public class Connection implements java.sql.Connection, PooledConnection {
       writer.flush();
 
       ConnectionHelper.authenticationHandler(credential, writer, reader, context);
-
       ConnectionHelper.compressionHandler(conf, context);
+
+      postConnectionQueries();
+      galeraStateValidation(galeraAllowedStates);
 
     } catch (IOException ioException) {
       destroySocket();
+
+      String errorMsg =
+          String.format(
+              "Could not connect to %s:%s : %s", host, socket.getPort(), ioException.getMessage());
       if (host == null) {
-        throw exceptionFactory.create(
-            String.format("Could not connect to socket : %s", ioException.getMessage()),
-            "08000",
-            ioException);
+        errorMsg = String.format("Could not connect to socket : %s", ioException.getMessage());
       }
 
-      throw exceptionFactory.create(
-          String.format(
-              "Could not connect to %s:%s : %s", host, socket.getPort(), ioException.getMessage()),
-          "08000",
-          ioException);
+      throw exceptionFactory.create(errorMsg, "08000", ioException);
     } catch (SQLException sqlException) {
       destroySocket();
       throw sqlException;
-    }
-
-    postConnectionQueries();
-
-    if (conf.getOptions().socketTimeout != null) {
-      this.socketTimeout = conf.getOptions().socketTimeout;
-    }
-
-    // validate galera state
-    if (hostAddress != null
-        && Boolean.TRUE.equals(hostAddress.master)
-        && !galeraAllowedStates.isEmpty()) {
-      galeraStateValidation();
     }
   }
 
@@ -171,113 +162,91 @@ public class Connection implements java.sql.Connection, PooledConnection {
     }
   }
 
-  private void galeraStateValidation() throws SQLException {
-    //    ResultSet rs;
-    //    try {
-    //      Results results = new Results();
-    //      executeQuery(true, results, CHECK_GALERA_STATE_QUERY);
-    //      results.commandEnd();
-    //      rs = results.getResultSet();
-    //
-    //    } catch (SQLException sqle) {
-    //      destroySocket();
-    //      throw exceptionFactory.create("fail to validate Galera state");
-    //    }
-    //
-    //    if (rs == null || !rs.next()) {
-    //      destroySocket();
-    //      throw exceptionFactory.create("fail to validate Galera state");
-    //    }
-    //
-    //    if (!galeraAllowedStates.contains(rs.getString(2))) {
-    //      destroySocket();
-    //      throw exceptionFactory.create(
-    //          String.format("fail to validate Galera state (State is %s)", rs.getString(2)));
-    //    }
+  private void galeraStateValidation(List<String> galeraAllowedStates) throws SQLException {
+    if (hostAddress != null
+        && Boolean.TRUE.equals(hostAddress.master)
+        && !galeraAllowedStates.isEmpty()) {
+
+      Statement stmt = createStatement();
+      ResultSet rs = stmt.executeQuery("show status like 'wsrep_local_state'");
+      if (rs == null || !rs.next()) {
+        throw exceptionFactory.create("fail to validate Galera state");
+      }
+      if (!galeraAllowedStates.contains(rs.getString(2))) {
+        throw exceptionFactory.create(
+            String.format("fail to validate Galera state (State is %s)", rs.getString(2)));
+      }
+    }
   }
 
   private void postConnectionQueries() throws SQLException {
-    //    try {
-    //
-    //      if (options.usePipelineAuth
-    //          && (options.socketTimeout == null
-    //              || options.socketTimeout == 0
-    //              || options.socketTimeout > 500)) {
-    //        // set a timeout to avoid hang in case server doesn't support pipelining
-    //        socket.setSoTimeout(500);
-    //      }
-    //
-    //      boolean mustLoadAdditionalInfo = true;
-    //      if (globalInfo != null) {
-    //        if (globalInfo.isAutocommit() == options.autocommit) {
-    //          mustLoadAdditionalInfo = false;
-    //        }
-    //      }
-    //
-    //      if (mustLoadAdditionalInfo) {
-    //        Map<String, String> serverData = new TreeMap<>();
-    //        if (options.usePipelineAuth && !options.createDatabaseIfNotExist) {
-    //          try {
-    //            sendPipelineAdditionalData();
-    //            readPipelineAdditionalData(serverData);
-    //          } catch (SQLException sqle) {
-    //            if ("08".equals(sqle.getSQLState())) {
-    //              throw sqle;
-    //            }
-    //            // in case pipeline is not supported
-    //            // (proxy flush socket after reading first packet)
-    //            additionalData(serverData);
-    //          }
-    //        } else {
-    //          additionalData(serverData);
-    //        }
-    //
-    //        writer.setMaxAllowedPacket(Integer.parseInt(serverData.get("max_allowed_packet")));
-    //        autoIncrementIncrement = Integer.parseInt(serverData.get("auto_increment_increment"));
-    //        loadCalendar(serverData.get("time_zone"), serverData.get("system_time_zone"));
-    //
-    //      } else {
-    //
-    //        writer.setMaxAllowedPacket((int) globalInfo.getMaxAllowedPacket());
-    //        autoIncrementIncrement = globalInfo.getAutoIncrementIncrement();
-    //        loadCalendar(globalInfo.getTimeZone(), globalInfo.getSystemTimeZone());
-    //      }
-    //
-    //      reader.setServerThreadId(this.serverThreadId, isMasterConnection());
-    //      writer.setServerThreadId(this.serverThreadId, isMasterConnection());
-    //
-    //      activeStreamingResult = null;
-    //      hostFailed = false;
-    //
-    //      if (options.usePipelineAuth) {
-    //        // reset timeout to configured value
-    //        if (options.socketTimeout != null) {
-    //          socket.setSoTimeout(options.socketTimeout);
-    //        } else {
-    //          socket.setSoTimeout(0);
-    //        }
-    //      }
-    //
-    //    } catch (SocketTimeoutException timeoutException) {
-    //      destroySocket();
-    //      String msg = "Socket error during post connection queries: " +
-    // timeoutException.getMessage();
-    //      if (options.usePipelineAuth) {
-    //        msg +=
-    //            "\nServer might not support pipelining, try disabling with option
-    // `usePipelineAuth` and `useBatchMultiSend`";
-    //      }
-    //      throw exceptionFactory.create(msg, "08000", timeoutException);
-    //    } catch (IOException ioException) {
-    //      destroySocket();
-    //      throw exceptionFactory.create(
-    //          "Socket error during post connection queries: " + ioException.getMessage(),
-    //          "08000",
-    //          ioException);
-    //    } catch (SQLException sqlException) {
-    //      destroySocket();
-    //      throw sqlException;
-    //    }
+    try {
+      if (conf.getOptions().socketTimeout == null
+              || conf.getOptions().socketTimeout == 0
+              || conf.getOptions().socketTimeout > 500) {
+        // set a timeout to avoid hang in case server doesn't support pipelining
+        socket.setSoTimeout(500);
+      }
+
+      ConnectionHelper.sendSessionInfos(context, conf.getOptions(), writer);
+      ConnectionHelper.sendRequestSessionVariables(context, writer);
+
+      Map<String, String> serverData = new TreeMap<>();
+      readPipelineAdditionalData(serverData);
+
+      writer.setMaxAllowedPacket(Integer.parseInt(serverData.get("max_allowed_packet")));
+      //autoIncrementIncrement = Integer.parseInt(serverData.get("auto_increment_increment"));
+      //loadCalendar(serverData.get("time_zone"), serverData.get("system_time_zone"));
+
+      this.socketTimeout = conf.getOptions().socketTimeout != null ? conf.getOptions().socketTimeout : 0;
+      socket.setSoTimeout(this.socketTimeout);
+
+    } catch (IOException e) {
+      throw exceptionFactory.create("Socket error during post connection queries", "08000", e);
+    }
+  }
+
+  private void readPipelineAdditionalData(Map<String, String> serverData) throws SQLException {
+
+    readResultsNoResultSet(new ArrayList<>(), "-SessionInfos-");
+    try {
+      readRequestSessionVariables(serverData);
+    } catch (SQLException sqlException) {
+      // fallback in case of galera non primary nodes that permit only show / set command,
+      // not SELECT when not part of quorum
+      Statement stmt = createStatement();
+      ResultSet rs = stmt.executeQuery("SHOW VARIABLES WHERE Variable_name in ("
+                      + "'max_allowed_packet',"
+                      + "'system_time_zone',"
+                      + "'time_zone',"
+                      + "'auto_increment_increment')");
+      while (rs.next()) {
+        if (logger.isDebugEnabled()) {
+          logger.debug("server data {} = {}", rs.getString(1), rs.getString(2));
+        }
+        serverData.put(rs.getString(1), rs.getString(2));
+      }
+    }
+  }
+
+  private void readRequestSessionVariables(Map<String, String> serverData) throws SQLException {
+    List<Completion> results = new ArrayList<>();
+    readResults("-Session Variables-", results);
+
+    Result result = (Result) results.get(0);
+    if (result != null) {
+      result.next();
+
+      serverData.put("max_allowed_packet", result.getString(1));
+      serverData.put("system_time_zone", result.getString(2));
+      serverData.put("time_zone", result.getString(3));
+      serverData.put("auto_increment_increment", result.getString(4));
+
+    } else {
+      throw exceptionFactory.create(
+          "Error reading SessionVariables results. Socket is connected ? " + socket.isConnected(),
+          "08000");
+    }
   }
 
   /**
@@ -292,16 +261,15 @@ public class Connection implements java.sql.Connection, PooledConnection {
     }
   }
 
-  private void sendQuery(ClientMessage message) throws SQLException {
-    sendQuery(
-        null, null, message, 0, 0, ResultSet.CONCUR_READ_ONLY, ResultSet.TYPE_FORWARD_ONLY, false);
+  private List<Completion> sendQuery(ClientMessage message) throws SQLException {
+    return sendQuery(
+        null, null, message, 0, ResultSet.CONCUR_READ_ONLY, ResultSet.TYPE_FORWARD_ONLY, false);
   }
 
   protected List<Completion> sendQuery(
       Statement stmt,
       String sql,
       ClientMessage message,
-      int maxRows,
       int fetchSize,
       int resultSetConcurrency,
       int resultSetType,
@@ -313,14 +281,17 @@ public class Connection implements java.sql.Connection, PooledConnection {
       writer.initPacket();
       message.encode(writer, context);
       writer.flush();
-      return readResults(
+
+      List<Completion> completions = new ArrayList<>();
+      readResults(
           stmt,
           sql,
-          maxRows,
+          completions,
           fetchSize,
           resultSetConcurrency,
           resultSetType,
           closeOnCompletion);
+      return completions;
     } catch (IOException ioException) {
       destroySocket();
       throw exceptionFactory
@@ -332,38 +303,75 @@ public class Connection implements java.sql.Connection, PooledConnection {
     }
   }
 
-  private List<Completion> readResults(
+  protected List<OkPacket> sendBatch(List<String> sqls) throws SQLException {
+    checkNotClosed();
+    if (stream != null) stream.fetchRemaining();
+    List<OkPacket> completions = new ArrayList<>();
+    String sql = null;
+    try {
+      for (int i = 0; i < sqls.size(); i++) {
+        sql = sqls.get(i);
+        writer.initPacket();
+        new QueryPacket(sql).encode(writer, context);
+        writer.flush();
+
+        readResultsNoResultSet(completions, sql);
+      }
+      return completions;
+    } catch (IOException ioException) {
+      destroySocket();
+      throw exceptionFactory.createBatchUpdate(
+          completions,
+          sqls.size(),
+          exceptionFactory.create(
+              "Socket error during post connection queries: " + ioException.getMessage(),
+              "08000",
+              ioException));
+    } catch (SQLException sqle) {
+      throw exceptionFactory.createBatchUpdate(completions, sqls.size(), sqle);
+    }
+  }
+
+  private void readResultsNoResultSet(List<OkPacket> completions, String sql) throws SQLException {
+    completions.add(readPacketNoResultSet(sql));
+    while ((context.getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0) {
+      completions.add(readPacketNoResultSet(sql));
+    }
+  }
+
+  private void readResults(String sql, List<? extends Completion> results) throws SQLException {
+    readResults(
+            null,
+            sql,
+            results,
+            0,
+            ResultSet.CONCUR_READ_ONLY,
+            ResultSet.TYPE_FORWARD_ONLY,
+            false);
+  }
+
+  private void readResults(
       Statement stmt,
       String sql,
-      int maxRows,
+      List<? extends Completion> completions,
       int fetchSize,
       int resultSetConcurrency,
       int resultSetType,
       boolean closeOnCompletion)
       throws SQLException {
-    List<Completion> completions = new ArrayList<>();
-    completions.add(
-        readPacket(
-            stmt,
-            sql,
-            maxRows,
-            fetchSize,
-            resultSetConcurrency,
-            resultSetType,
-            closeOnCompletion));
+    readPacket(
+        stmt, sql, completions, fetchSize, resultSetConcurrency, resultSetType, closeOnCompletion);
 
     while ((context.getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0) {
-      completions.add(
-          readPacket(
-              stmt,
-              sql,
-              maxRows,
-              fetchSize,
-              resultSetConcurrency,
-              resultSetType,
-              closeOnCompletion));
+      readPacket(
+          stmt,
+          sql,
+          completions,
+          fetchSize,
+          resultSetConcurrency,
+          resultSetType,
+          closeOnCompletion);
     }
-    return completions;
   }
 
   /**
@@ -373,10 +381,10 @@ public class Connection implements java.sql.Connection, PooledConnection {
    * @see <a href="https://mariadb.com/kb/en/mariadb/4-server-response-packets/">server response
    *     packets</a>
    */
-  public Completion readPacket(
+  public void readPacket(
       Statement stmt,
       String sql,
-      int maxRows,
+      List completions,
       int fetchSize,
       int resultSetConcurrency,
       int resultSetType,
@@ -393,7 +401,8 @@ public class Connection implements java.sql.Connection, PooledConnection {
           // *********************************************************************************************************
         case 0x00:
           stream = null;
-          return OkPacket.decode(buf, context);
+          completions.add(OkPacket.decode(buf, context));
+          return;
 
           // *********************************************************************************************************
           // * ERROR response
@@ -432,20 +441,18 @@ public class Connection implements java.sql.Connection, PooledConnection {
             throw new SQLFeatureNotSupportedException("TODO");
           }
 
-          Result result;
           if (fetchSize != 0) {
             if ((context.getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0) {
               context.setServerStatus(context.getServerStatus() - ServerStatus.MORE_RESULTS_EXISTS);
             }
 
-            result =
+            Result result =
                 new StreamingResult(
                     stmt,
                     true,
                     ci,
                     reader,
                     context,
-                    maxRows,
                     fetchSize,
                     lock,
                     resultSetType,
@@ -453,24 +460,116 @@ public class Connection implements java.sql.Connection, PooledConnection {
             if (!result.loaded()) {
               stream = stmt;
             }
+            completions.add(result);
           } else {
-            result =
+            completions.add(
                 new CompleteResult(
-                    stmt,
-                    true,
-                    ci,
-                    reader,
-                    context,
-                    maxRows,
-                    resultSetType,
-                    closeOnCompletion);
+                    stmt, true, ci, reader, context, resultSetType, closeOnCompletion));
             stream = null;
           }
-          return result;
       }
     } catch (IOException ioException) {
       destroySocket();
-      throw exceptionFactory.create("Socket error", "08000", ioException);
+      throw exceptionFactory.withSql(sql).create("Socket error", "08000", ioException);
+    }
+  }
+
+  /**
+   * Read server response packet.
+   *
+   * @throws SQLException if sub-result connection fail
+   * @see <a href="https://mariadb.com/kb/en/mariadb/4-server-response-packets/">server response
+   *     packets</a>
+   */
+  public OkPacket readPacketNoResultSet(String sql) throws SQLException {
+    ReadableByteBuf buf;
+    try {
+      buf = reader.readPacket(true);
+
+      switch (buf.getUnsignedByte()) {
+
+          // *********************************************************************************************************
+          // * OK response
+          // *********************************************************************************************************
+        case 0x00:
+          stream = null;
+          return OkPacket.decode(buf, context);
+
+          // *********************************************************************************************************
+          // * ERROR response
+          // *********************************************************************************************************
+        case 0xff:
+          // force current status to in transaction to ensure rollback/commit, since command may
+          // have
+          // issue a transaction
+          ErrorPacket errorPacket = ErrorPacket.decode(buf, context);
+          stream = null;
+          throw exceptionFactory
+              .withSql(sql)
+              .create(
+                  errorPacket.getMessage(), errorPacket.getSqlState(), errorPacket.getErrorCode());
+
+          // *********************************************************************************************************
+          // * ResultSet
+          // *********************************************************************************************************
+        default:
+          int fieldCount = buf.readLengthNotNull();
+
+          // read columns information's
+          for (int i = 0; i < fieldCount; i++) {
+            reader.readPacket(true);
+          }
+
+          if (!context.isEofDeprecated()) {
+            // skip intermediate EOF
+            reader.readPacket(true);
+          }
+
+          while (true) {
+            buf = reader.readPacket(false);
+            switch (buf.getUnsignedByte()) {
+              case 0xFF:
+                ErrorPacket err = ErrorPacket.decode(buf, context);
+                throw exceptionFactory.create(
+                    err.getMessage(), err.getSqlState(), err.getErrorCode());
+
+              case 0xFE:
+                if ((context.isEofDeprecated() && buf.readableBytes() < 0xffffff)
+                    || (!context.isEofDeprecated() && buf.readableBytes() < 8)) {
+                  buf.skip(); // skip header
+                  int serverStatus;
+                  int warnings;
+
+                  if (!context.isEofDeprecated()) {
+                    // EOF_Packet
+                    warnings = buf.readUnsignedShort();
+                    serverStatus = buf.readUnsignedShort();
+                  } else {
+                    // OK_Packet with a 0xFE header
+                    buf.skip(buf.readLengthNotNull()); // skip update count
+                    buf.skip(buf.readLengthNotNull()); // skip insert id
+                    serverStatus = buf.readUnsignedShort();
+                    warnings = buf.readUnsignedShort();
+                  }
+                  context.setServerStatus(serverStatus);
+                  context.setWarning(warnings);
+                  while ((context.getServerStatus() & ServerStatus.MORE_RESULTS_EXISTS) > 0) {
+                    try {
+                      readPacketNoResultSet(sql);
+                    } catch (SQLException e) {
+                      // eat
+                    }
+                  }
+                  throw exceptionFactory
+                      .withSql(sql)
+                      .create("No result-set is permit for this command");
+                }
+            }
+          }
+      }
+    } catch (IOException ioException) {
+      destroySocket();
+      throw exceptionFactory.withSql(sql).create("Socket error", "08000", ioException);
     }
   }
 
@@ -503,7 +602,8 @@ public class Connection implements java.sql.Connection, PooledConnection {
 
   @Override
   public Statement createStatement() {
-    return new Statement(this, lock, canUseServerTimeout, ResultSet.TYPE_FORWARD_ONLY , ResultSet.CONCUR_READ_ONLY);
+    return new Statement(
+        this, lock, canUseServerTimeout, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
   }
 
   @Override
@@ -931,16 +1031,16 @@ public class Connection implements java.sql.Connection, PooledConnection {
 
   private void checkClientValidProperty(final String name) throws SQLClientInfoException {
     if (name == null
-            || (!"ApplicationName".equals(name)
+        || (!"ApplicationName".equals(name)
             && !"ClientUser".equals(name)
             && !"ClientHostname".equals(name))) {
       Map<String, ClientInfoStatus> failures = new HashMap<>();
       failures.put(name, ClientInfoStatus.REASON_UNKNOWN_PROPERTY);
       throw new SQLClientInfoException(
-              "setClientInfo() parameters can only be \"ApplicationName\",\"ClientUser\" or \"ClientHostname\", "
-                      + "but was : "
-                      + name,
-              failures);
+          "setClientInfo() parameters can only be \"ApplicationName\",\"ClientUser\" or \"ClientHostname\", "
+              + "but was : "
+              + name,
+          failures);
     }
   }
 
@@ -981,12 +1081,12 @@ public class Connection implements java.sql.Connection, PooledConnection {
   public String getClientInfo(String name) throws SQLException {
     checkNotClosed();
     if (!"ApplicationName".equals(name)
-            && !"ClientUser".equals(name)
-            && !"ClientHostname".equals(name)) {
+        && !"ClientUser".equals(name)
+        && !"ClientHostname".equals(name)) {
       throw new SQLException(
-              "name must be \"ApplicationName\", \"ClientUser\" or \"ClientHostname\", but was \""
-                      + name
-                      + "\"");
+          "name must be \"ApplicationName\", \"ClientUser\" or \"ClientHostname\", but was \""
+              + name
+              + "\"");
     }
     try (java.sql.Statement statement = createStatement()) {
       try (ResultSet rs = statement.executeQuery("SELECT @" + name)) {
@@ -1004,7 +1104,7 @@ public class Connection implements java.sql.Connection, PooledConnection {
     Properties properties = new Properties();
     try (java.sql.Statement statement = createStatement()) {
       try (ResultSet rs =
-                   statement.executeQuery("SELECT @ApplicationName, @ClientUser, @ClientHostname")) {
+          statement.executeQuery("SELECT @ApplicationName, @ClientUser, @ClientHostname")) {
         if (rs.next()) {
           if (rs.getString(1) != null) {
             properties.setProperty("ApplicationName", rs.getString(1));
@@ -1038,8 +1138,8 @@ public class Connection implements java.sql.Connection, PooledConnection {
 
     if (!propertiesExceptions.isEmpty()) {
       String errorMsg =
-              "setClientInfo errors : the following properties where not set : "
-                      + propertiesExceptions.keySet();
+          "setClientInfo errors : the following properties where not set : "
+              + propertiesExceptions.keySet();
       throw new SQLClientInfoException(errorMsg, propertiesExceptions);
     }
   }
@@ -1111,11 +1211,11 @@ public class Connection implements java.sql.Connection, PooledConnection {
   public void setNetworkTimeout(Executor executor, int milliseconds) throws SQLException {
     if (this.isClosed()) {
       throw exceptionFactory.create(
-              "Connection.setNetworkTimeout cannot be called on a closed connection");
+          "Connection.setNetworkTimeout cannot be called on a closed connection");
     }
     if (milliseconds < 0) {
       throw exceptionFactory.create(
-              "Connection.setNetworkTimeout cannot be called with a negative timeout");
+          "Connection.setNetworkTimeout cannot be called with a negative timeout");
     }
     SQLPermission sqlPermission = new SQLPermission("setNetworkTimeout");
     SecurityManager securityManager = System.getSecurityManager();
@@ -1138,20 +1238,16 @@ public class Connection implements java.sql.Connection, PooledConnection {
 
   @Override
   public int getNetworkTimeout() throws SQLException {
+    checkNotClosed();
     return this.socketTimeout;
   }
 
   @Override
   public <T> T unwrap(Class<T> iface) throws SQLException {
-    try {
-      if (isWrapperFor(iface)) {
-        return iface.cast(this);
-      } else {
-        throw new SQLException("The receiver is not a wrapper for " + iface.getName());
-      }
-    } catch (Exception e) {
-      throw new SQLException("The receiver is not a wrapper and does not implement the interface");
+    if (isWrapperFor(iface)) {
+      return iface.cast(this);
     }
+    throw new SQLException("The receiver is not a wrapper for " + iface.getName());
   }
 
   @Override
