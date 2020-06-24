@@ -1,5 +1,9 @@
 # Change Log
 
+## [2.6.1-telenia](https://github.com/mariadb-corporation/mariadb-connector-j/tree/2.6.1) (23 Jun. 2020)
+
+* Return MySQL Connector/J for getDriverName with useMysqlMetadata=true
+
 ## [2.6.1](https://github.com/mariadb-corporation/mariadb-connector-j/tree/2.6.1) (23 Jun. 2020)
 [Full Changelog](https://github.com/mariadb-corporation/mariadb-connector-j/compare/2.6.0...2.6.1)
 

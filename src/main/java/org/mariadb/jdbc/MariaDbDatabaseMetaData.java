@@ -70,6 +70,7 @@ import org.mariadb.jdbc.util.Options;
 public class MariaDbDatabaseMetaData implements DatabaseMetaData {
 
   public static final String DRIVER_NAME = "MariaDB Connector/J";
+  public static final String MYSQL_DRIVER_NAME = "MySQL Connector/J";
   private final MariaDbConnection connection;
   private final UrlParser urlParser;
   private boolean datePrecisionColumnExist = true;
@@ -1234,6 +1235,9 @@ public class MariaDbDatabaseMetaData implements DatabaseMetaData {
   }
 
   public String getDriverName() {
+    if (urlParser.getOptions().useMysqlMetadata) {
+      return MYSQL_DRIVER_NAME;
+    }
     return DRIVER_NAME;
   }
 
